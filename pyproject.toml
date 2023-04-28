@@ -1,0 +1,7 @@
+[project]
+name = "pycoimset"
+version = "0.0.0"
+description = "Python library for set-valued optimization"
+requires-python = "3.11"
+license = { file = "LICENSE.md" }
+authors = [ { name = "Mirko Hahn", email = "mirhahn@ovgu.de" } ]

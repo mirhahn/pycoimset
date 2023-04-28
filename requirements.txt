@@ -1,0 +1,4 @@
+numpy
+plum-dispatch
+scikit-fem
+scipy
