@@ -18,17 +18,26 @@ Implementations of the basic unconstrained optimization loop.
 
 from dataclasses import dataclass
 import math
-from typing import Any, Optional
+from typing import Generic, Optional, TypeVar, cast
+from warnings import warn
 
-from ..functional import Functional
 from ..problem import Problem
-from ..space import SimilarityClass, SignedMeasure
-from ..step import StepFinder, SteepestDescentStepFinder
+from ..step import SteepestDescentStepFinder
+from ..typing import (
+    SignedMeasure,
+    SimilarityClass,
+    SimilaritySpace,
+    UnconstrainedStepFinder,
+)
 
 __all__ = ['UnconstrainedSolver']
 
 
-class UnconstrainedSolver:
+Spc = TypeVar('Spc', bound=SimilaritySpace)
+OtherSpc = TypeVar('OtherSpc', bound=SimilaritySpace)
+
+
+class UnconstrainedSolver(Generic[Spc]):
     """
     Unconstrained optimization loop.
 
@@ -38,66 +47,343 @@ class UnconstrainedSolver:
 
     @dataclass
     class Parameters:
+        '''
+        User specified parameters for the algorithm.
+        '''
+
+        #: Absolute stationarity tolerance.
         abstol: float = 1e-3
+
+        #: Trust region reduction threshold. Must be strictly between 0 and 1.
         sigma_low: float = 0.1
+
+        #: Trust region enlargement threshold. Must be strictly between
+        #: `sigma_low` and 1.
         sigma_high: float = 0.5
-        eta_1: float = 0.1
-        eta_2: float = 0.1
+
+        #: First error tuning parameter. Must be strictly between 0 and
+        #: :code:`1 - sigma_low`.
+        zeta_1: float = 0.1
+
+        #: Second error tuning parameter. Must be strictly between 0 and
+        #: 0.5.
+        zeta_2: float = 0.1
+
+        #: Initial trust region radius. This will be clamped to be a number
+        #: strictly greater than 0 and less than or equal to the maximal step
+        #: size possible in the variable space upon initialization.
         tr_radius: float = math.inf
 
-    # Key-to-index map for variables.
-    _keys: dict[Any, int]
+        #: Maximum number of iterations.
+        max_iter: Optional[int] = None
 
-    # Variables
-    _var: list[SimilarityClass]
+    @dataclass
+    class State(Generic[OtherSpc]):
+        '''
+        Internal state maintained during iteration.
+        '''
 
-    # Step finder
-    _step: StepFinder
+        #: Variable values.
+        x: SimilarityClass[OtherSpc]
 
-    # Parameter set
+        #: Objective function value during last evaluation.
+        f: Optional[float] = None
+
+        #: Objective function error bound during last evaluation.
+        e_f: Optional[float] = None
+
+        #: Gradient measures obtained during last evaluation.
+        g: Optional[SignedMeasure] = None
+
+        #: Gradient error obtained during last evaluation. The precise meaning
+        #: of this number differs based on whether the objective functional is
+        #: :math:`L^1` or :math:`L^\infty` controlled.
+        e_g: Optional[float] = None
+
+        #: Instationarity measure during last evaluation.
+        dual_inf: Optional[float] = None
+
+        #: Error of instationarity measure during last evaluation.
+        err_dual_inf: Optional[float] = None
+
+        #: Current trust region radius.
+        tr_radius: Optional[float] = None
+
+    @dataclass
+    class Stats:
+        '''
+        Statistics collected during the optimization loop.
+
+        This is useful for post-optimization performance evaluation. The
+        structure can be re-used in subsequent runs. In this case, statistics
+        accumulate.
+        '''
+
+        #: Total number of iterations including both accepted and rejected
+        #: steps.
+        n_iter: int = 0
+
+        #: Number of objective function evaluations.
+        n_fun_eval: int = 0
+
+        #: Number of gradient evaluations.
+        n_grad_eval: int = 0
+
+        #: Number of times that a step was accepted.
+        n_steps_accepted: int = 0
+
+        #: Number of times that a step was rejected.
+        n_steps_rejected: int = 0
+
+        #: Total wall time spent in the optimization loop (in seconds).
+        t_total: float = 0.0
+
+        #: Total wall time spent evaluating the objective (in seconds).
+        t_fun_eval: float = 0.0
+
+        #: Total wall time spent evaluating the gradient (in seconds).
+        t_grad_eval: float = 0.0
+
+    _prob: Problem[Spc]
     _param: Parameters
+    _state: State[Spc]
+    _stats: Stats
+    _step: UnconstrainedStepFinder[Spc]
 
-    # Objective functional
-    _objfunc: Functional
-
-    # Input map for the objective functional
-    _objmap: list[int]
-
-    # Maximal step size.
-    _maxstep: float
-
-    def __init__(self, problem: Problem):
-        if problem.objective is None:
-            raise ValueError('problem.objective')
+    def __init__(self, problem: Problem[Spc],
+                 step_finder: UnconstrainedStepFinder[Spc]):
         if len(problem.constraints) > 0:
-            raise ValueError('problem.constraints')
+            raise ValueError('Cannot solve problem with constraints.')
 
-        self._keys = {}
-        self._var = []
-        for key, val in problem.variables.items():
-            self._keys[key] = len(self._var)
-            self._var.append(val.copy(True))
-        self._maxstep = sum((var.space.measure for var in self._var))
+        # Store a reference to the problem.
+        self._prob = problem
 
-        self._step = SteepestDescentStepFinder()
+        # Set up parameter structure.
         self._param = UnconstrainedSolver.Parameters()
 
-        self._objfunc = problem.objective.functional
-        self._objmap = [
-            self._keys[key] for key in problem.objective.input_map
-        ]
+        # Set up the internal state.
+        self._state = UnconstrainedSolver.State(x=problem.initial_value)
+
+        # Set up stats.
+        self._stats = UnconstrainedSolver.Stats()
+
+        # Set up step finder.
+        if step_finder is None:
+            self._step = SteepestDescentStepFinder[Spc]()
+        else:
+            self._step = step_finder
 
     @property
-    def variables(self) -> list[SimilarityClass]:
-        '''List of all variables.'''
-        return list(self._var)
-
-    @property
-    def solution(self) -> dict[Any, SimilarityClass]:
-        '''Dictionary of solution variables with associated keys.'''
-        return {key: self._var[idx] for key, idx in self._keys.items()}
-
-    @property
-    def parameters(self) -> Parameters:
-        '''Parameter object.'''
+    def param(self) -> Parameters:
+        '''Algorithmic parameters.'''
         return self._param
+
+    @property
+    def solution(self) -> SimilarityClass:
+        '''Current solution.'''
+        return self._state.x
+
+    def _l1errbnd(self, tr_radius: float) -> float:
+        '''
+        Gradient error bound for :math:`L^1` controlled functional.
+
+        This is an internal function. You should not call it directly.
+        '''
+        return self._param.abstol * min(
+            self._param.zeta_2,
+            (
+                self._param.zeta_1
+                * (1 - 2 * self._param.zeta_2)
+                * self._step.quality
+            ) / (
+                self._prob.space.measure
+                * (1 + self._param.zeta_1)
+            ) * tr_radius
+        )
+
+    def _l1graderr_global(self, err_bnd: float) -> float:
+        '''
+        Gradient error bound valid for all product similarity classes.
+
+        This is an internal function. You should not call it directly. This
+        variant is intended for use with :math:`L^1` controlled functionals.
+        '''
+        return err_bnd
+
+    def _l1graderr_local(self, err_bnd: float, _: SimilarityClass) -> float:
+        '''
+        Gradient error bound valid for a specific product similarity class.
+
+        This is an internal function. You should not call it directly. This
+        variant is intended for use with :math:`L^1` controlled functionals.
+        '''
+        return err_bnd
+
+    def _linferrbnd(self, _: float) -> float:
+        '''
+        Gradient error bound for :math:`L^\\infty` controlled functional.
+
+        This is an internal function. You should not call it directly.
+        '''
+        max_step = self._prob.space.measure
+        return self._param.abstol * min(
+            self._param.zeta_2 / max_step,
+            (
+                self._param.zeta_1
+                * (1 - 2 * self._param.zeta_2)
+                * self._step.quality
+            ) / (max_step * (1 + self._param.zeta_1))
+        )
+
+    def _linfgraderr_global(self, err_bnd: float) -> float:
+        '''
+        Gradient error bound valid for all product similarity classes.
+
+        This is an internal function. You should not call it directly. This
+        variant is intended for use with :math:`L^\\infty` controlled
+        functionals.
+        '''
+        return err_bnd * self._prob.space.measure
+
+    def _linfgraderr_local(self, err_bnd: float, cls: SimilarityClass
+                           ) -> float:
+        '''
+        Gradient error bound valid for a specific product similarity class.
+
+        This is an internal function. You should not call it directly. This
+        variant is intended for use with :math:`L^\\infty` controlled
+        functionals.
+        '''
+        return err_bnd * cls.measure
+
+    def solve(self):
+        '''
+        Run the main optimization loop.
+        '''
+        # Introduce shorthands for the four data objects.
+        problem = self._prob
+        par = self._param
+        state = self._state
+        stats = self._stats
+        step_finder = self._step
+
+        # Sanitize parameters.
+        if par.abstol <= 0.0:
+            par.abstol = 1e-3
+            warn('param.abstol must be strictly positive (reset to 1e-3)')
+        if par.sigma_low <= 0 or par.sigma_low >= 1:
+            par.sigma_low = 0.1
+            warn('param.sigma_low must be strictly between 0 and 1 (reset to '
+                 '0.1)')
+        if par.sigma_high <= par.sigma_low:
+            par.sigma_high = 2 * par.sigma_low
+            warn('param.sigma_high must be greater than param.sigma_low ('
+                 f'reset to {par.sigma_high})')
+        if par.zeta_1 <= 0 or par.zeta_1 >= 1 - par.sigma_low:
+            par.zeta_1 = 0.5 * (1 - par.sigma_low)
+            warn('param.zeta_1 must be strictly between 0 and 1 - '
+                 f'param.sigma_low (reset to {par.zeta_1})')
+        if par.zeta_2 <= 0 or par.zeta_2 >= 0.5:
+            par.zeta_2 = 0.1
+            warn('param.zeta_2 must be strictly between 0 and 0.5 (reset to '
+                 f'{par.zeta_2})')
+
+        # Helper functions for error bounds.
+        if problem.objective.grad_tol_type == 'l1':
+            errbnd = self._l1errbnd
+            graderr_global = self._l1graderr_global
+            graderr_local = self._l1graderr_local
+        elif problem.objective.grad_tol_type == 'linf':
+            errbnd = self._linferrbnd
+            graderr_global = self._linfgraderr_global
+            graderr_local = self._linfgraderr_local
+        else:
+            raise ValueError('Gradient tolerance type '
+                             f'\'{problem.objective.grad_tol_type}\' is '
+                             'unknown.')
+
+        # Initialize trust region radius if necessary.
+        if state.tr_radius is None:
+            state.tr_radius = par.tr_radius
+        if state.tr_radius <= 0.0:
+            state.tr_radius = math.inf
+        state.tr_radius = max(state.tr_radius, problem.space.measure)
+
+        # Perform initial gradient evaluation if necessary.
+        problem.objective.arg = state.x
+        problem.objective.grad_tol = errbnd(state.tr_radius)
+        state.g, state.e_g = problem.objective.get_gradient()
+
+        while (par.max_iter is None or stats.n_iter < par.max_iter):
+            # Calculate dual infeasibility and terminate if near-stationary.
+            full_step = state.g < 0.0
+            state.dual_inf = -state.g(full_step)
+            state.err_dual_inf = graderr_global(state.e_g)
+
+            if state.dual_inf <= par.abstol - state.err_dual_inf:
+                break
+
+            # Find an improvement step.
+            step_finder.gradient = state.g
+            step_finder.tolerance = (
+                (par.zeta_2 * step_finder.quality * par.abstol)
+                / problem.space.measure
+                * state.tr_radius
+            )
+            step, _ = step_finder.get_step()
+
+            # Calculate projected objective change and error bound.
+            proj_diff = state.g(step)
+            proj_err = graderr_local(state.e_g, step)
+
+            # Calculate objective function evaluation error budget.
+            error_budget = par.sigma_low * min(
+                (abs(proj_diff) - proj_err) * par.zeta_1 - proj_err,
+                (abs(proj_diff) * par.zeta_1 - proj_err) / (1 - par.zeta_1)
+            )
+
+            # Evaluate functional at current point if necessary.
+            if state.f is None or state.e_f is None or \
+                    state.e_f > (2 / 3) * error_budget:
+                problem.objective.val_tol = (2/3) * error_budget
+                state.f, state.e_f = problem.objective.get_value()
+
+            # Evaluate functional at end point.
+            problem.objective.arg = state.x ^ step
+            problem.objective.val_tol = min((2/3) * error_budget,
+                                            cast(float, state.e_f))
+            f_end, e_f_end = problem.objective.get_value()
+
+            # Decide whether to accept or reject the step.
+            rho = (f_end - state.f) / proj_diff
+            if rho >= par.sigma_low:
+                # Update state
+                state.x, state.f, state.e_f = problem.objective.arg, f_end, \
+                    e_f_end
+
+                # Update trust region radius
+                if rho >= par.sigma_high:
+                    state.tr_radius = min(2 * state.tr_radius,
+                                          problem.space.measure)
+
+                # Evaluate gradient
+                problem.objective.grad_tol = errbnd(state.tr_radius)
+                state.g, state.e_g = problem.objective.get_gradient()
+
+                # Update stats.
+                stats.n_steps_accepted += 1
+            else:
+                # Update trust region radius.
+                state.tr_radius /= 2
+
+                # Reset argument of objective.
+                problem.objective.arg = state.x
+
+                # Re-evaluate gradient if necessary.
+                problem.objective.grad_tol = errbnd(state.tr_radius)
+                state.g, state.e_g = problem.objective.get_gradient()
+
+                # Update stats.
+                stats.n_steps_rejected += 1
+
+            stats.n_iter += 1

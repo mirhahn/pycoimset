@@ -1,4 +1,5 @@
+# Requirements for the main PyCoimset library.
 numpy
-plum-dispatch
-scikit-fem
-scipy
+
+# Requirements for example problems.
+-r examples/requirements.txt

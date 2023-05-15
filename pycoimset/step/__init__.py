@@ -25,6 +25,5 @@ This module is intended to hold a variety of step solvers.
 '''
 
 from .steepest_descent import SteepestDescentStepFinder
-from .step_finder import StepFinder
 
-__all__ = ['SteepestDescentStepFinder', 'StepFinder']
+__all__ = ['SteepestDescentStepFinder']

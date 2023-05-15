@@ -2,15 +2,25 @@
 Python library for continuous optimization with set-valued variables.
 '''
 
-from .functional import Functional
-from .problem import Constraint, MappedFunctional, Problem
-from .space import SimilarityClass, SignedMeasure
+from .problem import Constraint, Problem
+from .solver.unconstrained import UnconstrainedSolver
+from .step import SteepestDescentStepFinder
+from .typing import (
+    Functional,
+    SignedMeasure,
+    SimilarityClass,
+    SimilaritySpace,
+    UnconstrainedStepFinder,
+)
 
 __all__ = [
     'Constraint',
     'Functional',
-    'MappedFunctional',
     'Problem',
+    'UnconstrainedSolver',
+    'UnconstrainedStepFinder',
     'SimilarityClass',
-    'SignedMeasure'
+    'SignedMeasure',
+    'SimilaritySpace',
+    'SteepestDescentStepFinder'
 ]

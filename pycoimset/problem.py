@@ -19,77 +19,62 @@ Problem specification classes.
 '''
 
 from dataclasses import dataclass
-from typing import Any, List, Mapping, Optional
+from typing import Generic, Optional, Sequence, TypeVar
 
-from .functional import Functional
-from .space import SimilarityClass
+from .typing import Functional, SimilarityClass, SimilaritySpace
 
 
 __all__ = [
     'Constraint',
-    'MappedFunctional',
     'Problem',
 ]
 
 
-@dataclass
-class MappedFunctional:
-    '''
-    Functional with associated input mapping.
-    '''
-    functional: Functional
-    input_map: list[Any]
+Spc = TypeVar('Spc', bound=SimilaritySpace)
 
 
 @dataclass
-class Constraint:
+class Constraint(Generic[Spc]):
     '''
     Description of a differentiable scalar-valued constraint.
     '''
-    val: MappedFunctional
-    lb: Optional[float]
-    ub: Optional[float]
+    val: Functional[Spc]
+    lb: Optional[float] = None
+    ub: Optional[float] = None
 
 
-class Problem:
+class Problem(Generic[Spc]):
     '''
     Description of an optimization problem.
     '''
-    _var: dict[Any, SimilarityClass]
-    _obj: Optional[MappedFunctional]
-    _con: list[Constraint]
+    _spc: Spc
+    _obj: Functional[Spc]
+    _con: tuple[Constraint[Spc], ...]
+    _x0: Optional[SimilarityClass[Spc]]
 
-    def __init__(self):
-        self._var = {}
-        self._obj = None
-        self._con = []
-
-    def add_var(self, key: Any, initial_value: SimilarityClass):
-        if key in self._var:
-            raise KeyError(key)
-        self._var[key] = initial_value
-
-    def add_constr(self, constr: Constraint):
-        if any(((missing := key) not in self._var
-                for key in constr.val.input_map)):
-            raise KeyError(str(missing))
-        self._con.append(constr)
+    def __init__(self, space: Spc, objective: Functional[Spc],
+                 *constraints: Constraint[Spc]):
+        self._spc = space
+        self._obj = objective
+        self._con = constraints
 
     @property
-    def objective(self) -> Optional[MappedFunctional]:
+    def space(self) -> Spc:
+        '''Variable space.'''
+        return self._spc
+
+    @property
+    def initial_value(self) -> SimilarityClass:
+        '''Initial value.'''
+        if self._x0 is None:
+            return self._spc.empty_class
+        else:
+            return self._x0
+
+    @property
+    def objective(self) -> Functional[Spc]:
         return self._obj
 
-    @objective.setter
-    def objective(self, value: Optional[MappedFunctional]):
-        if value is not None and any(((missing := key) not in self._var
-                                      for key in value.input_map)):
-            raise KeyError(str(missing))
-        self._obj = value
-
     @property
-    def variables(self) -> Mapping[Any, SimilarityClass]:
-        return self._var
-
-    @property
-    def constraints(self) -> List[Constraint]:
+    def constraints(self) -> Sequence[Constraint[Spc]]:
         return self._con
