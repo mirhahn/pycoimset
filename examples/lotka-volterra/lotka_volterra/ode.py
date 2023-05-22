@@ -2,9 +2,10 @@
 Main Lotka-Volterra fishing ODE system.
 '''
 
-from typing import Optional, cast
+from typing import Optional, cast, overload
 
 import numpy
+from numpy.typing import ArrayLike
 import scipy.integrate
 
 
@@ -39,7 +40,7 @@ class LotkaForwardIVP:
         if self.coefficients.shape != (2,):
             raise ValueError('`coeff` must have shape (2,).')
         if self._initial.shape != (2,):
-            raise ValueError('`coeff` must have shape (2,).')
+            raise ValueError('`initial_state` must have shape (2,).')
         if self.time_range[0] >= self.time_range[1]:
             raise ValueError('`start_time` must be strictly smaller than '
                              '`end_time`.')
@@ -275,6 +276,14 @@ class LotkaAdjointIVP:
         '''
         return numpy.array([0.0, 0.0, 1.0])
 
+    @overload
+    def import_times(self, times: float) -> float:
+        ...
+
+    @overload
+    def import_times(self, times: ArrayLike) -> numpy.ndarray:
+        ...
+
     def import_times(self, times):
         '''
         Import a time vector to the reversed time scale.
@@ -284,8 +293,9 @@ class LotkaAdjointIVP:
         Its counterpart is `export_times` which converts from the adjoint time
         scale to the original time scale.
 
-        :param times: Time value. Can be scalar or array-like. If this is
-                      array-like, it is first converted to a `numpy.ndarray`.
+        :param times: Time value. Can be scalar or array-like. If this
+                      is array-like, it is first converted to a
+                      `numpy.ndarray`.
         :type times: float or array-like
         :rtype: float or `numpy.ndarray`
         '''
@@ -293,6 +303,14 @@ class LotkaAdjointIVP:
             times = numpy.asarray(times)
         _, tend = self.fwd_ivp.time_range
         return tend - times
+
+    @overload
+    def export_times(self, times: float) -> float:
+        ...
+
+    @overload
+    def export_times(self, times: ArrayLike) -> numpy.ndarray:
+        ...
 
     def export_times(self, times):
         '''

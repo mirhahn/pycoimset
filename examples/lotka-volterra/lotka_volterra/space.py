@@ -3,15 +3,16 @@ Implementation of a similarity class.
 '''
 
 import copy
-import functools
 from types import NotImplementedType
-from typing import Callable, Optional, Self
+from typing import Callable, Optional, Self, assert_type, cast, overload
 
 import numpy
 from numpy.typing import ArrayLike
 import sortednp
 
 from pycoimset.typing import SignedMeasure, SimilarityClass, SimilaritySpace
+
+from .polyfit import PolynomialTrajectory
 
 
 __all__ = [
@@ -25,6 +26,10 @@ def filter_switch_time_duplicates(times: ArrayLike):
     '''Filter duplicate entries out of a sorted switching time array.'''
     # Convert input to NumPy array.
     times = numpy.asarray(times)
+
+    # Short-circuit if the array is empty.
+    if len(times) == 0:
+        return times
 
     # Indicates whether an element is equal to its successor.
     eq_flg = numpy.concatenate((times[:-1] == times[1:], [False]))
@@ -300,7 +305,7 @@ class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace]):
 
         # Merge the chunk lists.
         chunks = [chunk for chunk_pair in zip(chunks_a, chunks_b)
-                  for chunk in chunk_pair if len(chunk) > 0]
+                  for chunk in cast(tuple, chunk_pair) if len(chunk) > 0]
         switch_times = numpy.concatenate(chunks)
 
         # Remove duplicates (can only be single pair duplicates)
@@ -351,50 +356,72 @@ class PolynomialSignedMeasure(SignedMeasure[IntervalSimilaritySpace]):
     _space: IntervalSimilaritySpace
 
     #: Array of interpolation polynomials.
-    polynomials: numpy.ndarray
+    _poly: PolynomialTrajectory
 
-    #: NumPy ufunc to get lower domain bound of polynomials (returns dtype
-    #: 'object').
-    __polydomlb = numpy.frompyfunc(lambda p: p.domain[0], nin=1, nout=1)
-
-    #: NumPy ufunc to get derivative of polynomials.
-    __polyderiv = numpy.frompyfunc(lambda p: p.deriv(), nin=1, nout=1)
-
-    #: NumPy ufunc to get integral of polynomials.
-    __polyinteg = numpy.frompyfunc(lambda p: p.integ(), nin=1, nout=1)
-
+    @overload
     def __init__(self, space: IntervalSimilaritySpace,
-                 polynomials: numpy.ndarray | list[object]):
-        self._space = space
-        self.polynomials = numpy.asarray(polynomials, dtype=object)
+                 trajectory: PolynomialTrajectory):
+        ...
+
+    @overload
+    def __init__(self, space: IntervalSimilaritySpace, time_grid: ArrayLike,
+                 coefficients: ArrayLike):
+        ...
+
+    def __init__(self, *args, **kwargs):
+        space = args[0] if len(args) > 0 else kwargs['space']
+        traj = args[1] if len(args) == 2 else kwargs.get('trajectory', None)
+        grid = args[1] if len(args) == 3 else kwargs.get('time_grid', None)
+        coef = args[2] if len(args) == 3 else kwargs.get('coefficients', None)
+
+        if not isinstance(space, IntervalSimilaritySpace):
+            raise TypeError('`space` is not `IntervalSimilaritySpace`')
+        self._space = assert_type(space, IntervalSimilaritySpace)
+
+        if traj is not None:
+            if not isinstance(traj, PolynomialTrajectory):
+                raise TypeError('`trajectory` is not PolynomialTrajectory`')
+
+            t0, t1 = space.time_range
+            if traj.t_min != t0 or traj.t_max != t1:
+                raise ValueError('`trajectory` deviates from time range')
+
+            self._poly = assert_type(traj, PolynomialTrajectory)
+        else:
+            if grid is None or coef is None:
+                raise ValueError('call to `__init__` matches no signature')
+
+            grid = numpy.asarray(grid, dtype=float).flatten()
+            coef = numpy.asarray(coef, dtype=float)
+
+            t0, t1 = space.time_range
+            if grid[0] != t0 or grid[-1] != t1:
+                raise ValueError('`time_grid` does not match time range')
+
+            if coef.ndim != 2:
+                raise ValueError('`coefficients` must be 2-D')
+
+            if coef.shape[0] != grid.size - 1:
+                raise ValueError('shapes of `time_grid` and `coefficients` '
+                                 f'are inconsistent [{grid.shape} and '
+                                 f'{coef.shape}]')
+
+            self._poly = PolynomialTrajectory(grid, coef)
 
     def __repr__(self) -> str:
         '''Generate string representation.'''
         return (f'PolynomialSignedMeasure({repr(self._space)}, '
-                f'{repr(self.polynomials)})')
+                f'{repr(self._poly)})')
 
     @property
     def space(self) -> IntervalSimilaritySpace:
         '''Underlying similarity space.'''
         return self._space
 
-    @functools.cached_property
-    def time_grid(self) -> numpy.ndarray:
-        '''Starting times for the polynomial domains.'''
-        if len(self.polynomials) == 0:
-            return numpy.empty((0,))
-        return PolynomialSignedMeasure.__polydomlb(self.polynomials)\
-                                      .astype(float)
-
-    @functools.cached_property
-    def poly_integ(self) -> numpy.ndarray:
-        '''Array of integral polynomials.'''
-        return PolynomialSignedMeasure.__polyinteg(self.polynomials)
-
-    @functools.cached_property
-    def poly_deriv(self) -> numpy.ndarray:
-        '''Array of integral polynomials.'''
-        return PolynomialSignedMeasure.__polyderiv(self.polynomials)
+    @property
+    def polynomial_trajectory(self) -> PolynomialTrajectory:
+        '''Polynomials defining the trajectory.'''
+        return self._poly
 
     def __call__(self, simcls: SimilarityClass) -> float:
         '''Return measure of a similarity class.'''
@@ -404,68 +431,27 @@ class PolynomialSignedMeasure(SignedMeasure[IntervalSimilaritySpace]):
         if simcls.space is not self._space:
             raise ValueError('Similarity space does not match.')
 
-        # Retrieve integral polynomials and time grid.
-        start_times = self.time_grid
-        poly = self.poly_integ
-        switch = simcls.switch_times
+        # Evaluate antiderivative at switching times.
+        antideriv = self._poly.poly_anti_deriv()(simcls.switch_times)
 
-        # Short-circuit if there is nothing to do. Otherwise, obtain end of
-        # last polynomial's domain.
-        if len(poly) == 0:
-            return 0.0
-        end_time = poly[-1].domain[1]
-
-        # Locate switching times within starting time array.
-        pos_start = numpy.searchsorted(start_times, switch[0::2], side='right'
-                                       ) - 1
-        pos_end = numpy.searchsorted(start_times, switch[1::2], side='left')
-
-        row_nonzero = (pos_end > 0) & (switch[0::2] < end_time)
-        row_single = row_nonzero & (pos_start + 1 == pos_end)
-        row_multi = row_nonzero & ~row_single
-
-        idx_single = numpy.flatnonzero(row_single)
-        idx_multi = numpy.flatnonzero(row_multi)
-
-        # Accumulate measure.
-        meas_single = sum((
-            (p := poly[pos_start[ridx]])(switch[2 * ridx + 1])  # type: ignore
-            - p(switch[2 * ridx])                               # type: ignore
-            for ridx in idx_single
-        ))
-        meas_multi_inner = sum((
-            (p := poly[idx])(p.domain[1])                       # type: ignore
-            - p(p.domain[0])                                    # type: ignore
-            for ridx in idx_multi
-            for idx in range(pos_start[ridx] + 1, pos_end[ridx] - 1)
-        ))
-        meas_multi_start = sum((
-            (p := poly[idx])(p.domain[1])                       # type: ignore
-            - p(switch[2 * ridx])                               # type: ignore
-            for ridx in idx_multi
-            if (idx := pos_start[ridx]) >= 0
-        ))
-        meas_multi_end = sum((
-            (p := poly[pos_end[ridx] - 1])(                     # type: ignore
-                switch[2 * ridx + 1]
-            )
-            - p(p.domain[0])                                    # type: ignore
-            for ridx in idx_multi
-        ))
-
-        return (meas_single + meas_multi_inner + meas_multi_start
-                + meas_multi_end)
+        # Calculate measure.
+        return numpy.sum(antideriv[1:] - antideriv[:-1])
 
     def __levelset(self, cmp: Callable[[ArrayLike, ArrayLike], ArrayLike],
                    level: float) -> IntervalSimilarityClass:
         '''Obtain sublevel set for shifted polynomials.'''
         # Obtain shifted polynomials and derivative polynomials.
-        poly = self.polynomials
+        poly = self._poly - level
+        time = poly.ts
 
         # Find roots of each polynomial.
-        roots = numpy.stack([
-            numpy.concatenate((p.domain, (p - level).roots())) for p in poly
-        ])
+        roots = numpy.concatenate(
+            (
+                time[:-1].reshape((-1, 1)),
+                time[1:].reshape((-1, 1)),
+                poly.roots(fill=numpy.inf)
+            ),
+            axis=1)
         dom_start, dom_end = roots[:, 0], roots[:, 1]
         roots = numpy.real_if_close(roots)
 
@@ -485,10 +471,10 @@ class PolynomialSignedMeasure(SignedMeasure[IntervalSimilaritySpace]):
 
         # Calculate midpoints (real axis only) and eval shifted polynomials.
         mid = (roots[:, 1:] + roots[:, :-1]) / 2
-        mid_val = numpy.stack([p(x) for p, x in zip(poly, mid)])
+        mid_val = poly.piece_eval(mid)
 
         # Apply comparator to all midpoint values.
-        mid_match = numpy.asarray(cmp(mid_val, level))
+        mid_match = numpy.asarray(cmp(mid_val, 0.0))
 
         # Figure out which interval break points should be included in
         # the list of switch times.
@@ -524,23 +510,20 @@ class PolynomialSignedMeasure(SignedMeasure[IntervalSimilaritySpace]):
         return self.__levelset(numpy.greater_equal, level)
 
     def __mul__(self, factor: float) -> Self:
-        return PolynomialSignedMeasure(self._space, self.polynomials * factor)
+        return PolynomialSignedMeasure(self._space, self._poly * factor)
 
     def __rmul__(self, factor: float) -> Self:
-        return PolynomialSignedMeasure(self._space, self.polynomials * factor)
+        return PolynomialSignedMeasure(self._space, self._poly * factor)
+
+    def __truediv__(self, divisor: float) -> Self:
+        return PolynomialSignedMeasure(self._space, self._poly / divisor)
 
     def __add__(self, other: SignedMeasure) -> Self | NotImplementedType:
         if not isinstance(other, PolynomialSignedMeasure):
             return NotImplemented
         if other._space is not self._space:
             raise ValueError('Similarity space mismatch')
-
-        _, pa, pb = join_polynomial_splines(
-            self.time_grid, self.polynomials,
-            other.time_grid, other.polynomials
-        )
-
-        return PolynomialSignedMeasure(self._space, pa + pb)
+        return PolynomialSignedMeasure(self._space, self._poly + other._poly)
 
     def __radd__(self, other: SignedMeasure) -> Self | NotImplementedType:
         if not isinstance(other, PolynomialSignedMeasure):
@@ -552,13 +535,7 @@ class PolynomialSignedMeasure(SignedMeasure[IntervalSimilaritySpace]):
             return NotImplemented
         if other._space is not self._space:
             raise ValueError('Similarity space mismatch')
-
-        _, pa, pb = join_polynomial_splines(
-            self.time_grid, self.polynomials,
-            other.time_grid, other.polynomials
-        )
-
-        return PolynomialSignedMeasure(self._space, pa - pb)
+        return PolynomialSignedMeasure(self._space, self._poly - other._poly)
 
     def __rsub__(self, other: SignedMeasure) -> Self | NotImplementedType:
         if not isinstance(other, PolynomialSignedMeasure):

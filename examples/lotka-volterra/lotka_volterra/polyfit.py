@@ -2,56 +2,455 @@
 Helpers for polynomial fitting of 'fake' ODE trajectories.
 '''
 
-import copy
+from itertools import repeat
+from typing import Optional, cast
+from types import NotImplementedType
 
 import numpy
 from numpy.typing import ArrayLike, NDArray
-import scipy.integrate
+import scipy
 import sortednp
+
+from .typing import OdeSolutionLike
 
 
 __all__ = [
-    'PolynomialDenseOutput',
+    'PolynomialTrajectory',
     'merge_time_grids',
     'midpoint_time_grid',
     'polyfit_quartic',
 ]
 
 
-class PolynomialDenseOutput(scipy.integrate.DenseOutput):
+class PolynomialTrajectory(OdeSolutionLike):
     '''
-    Dense output representation using NumPy polynomials for interpolation.
+    Facsimile of `scipy.integrate.OdeSolution` that uses vectorized
+    polynomial operations.
     '''
 
-    #: Array of component polynomials.
-    polynomials: NDArray
+    #: Time instants between which local interpolants are defined.
+    #: Must be strictly increasing.
+    ts: NDArray
 
-    def __init__(self, poly: ArrayLike):
+    #: Array of coefficients.
+    coef: NDArray
+
+    #: Joint window used by all polynomials. Defaults to `(-1.0, 1.0)`.
+    window: tuple[float, float]
+
+    #: Mapping parameter.
+    _scale: NDArray
+
+    #: Derivative cache.
+    _deriv: Optional['PolynomialTrajectory']
+
+    #: Antiderivative cache.
+    _antideriv: Optional['PolynomialTrajectory']
+
+    def __init__(self, ts: ArrayLike, coef: ArrayLike,
+                 window: Optional[tuple[float, float]] = None,
+                 mapscale: Optional[ArrayLike] = None):
+        self.ts = numpy.asarray(ts)
+        self.coef = numpy.asarray(coef)
+
+        if window is None:
+            self.window = (-1.0, 1.0)
+        else:
+            self.window = window
+
+        # Calculate mapping parameters.
+        if mapscale is None:
+            x0, x1 = self.window
+            self._scale = (x1 - x0) / (self.ts[1:] - self.ts[:-1])
+        else:
+            self._scale = numpy.asarray(mapscale)
+
+        # Set up cache for derivatives and antiderivatives.
+        self._deriv = None
+        self._antideriv = None
+
+    def __repr__(self) -> str:
+        '''Create string representation.'''
+        return (f'PolynomialTrajectory({repr(self.ts)}, {repr(self.coef)}, '
+                f'window={repr(self.window)})')
+
+    def __call__(self, t: ArrayLike) -> NDArray:
+        '''Evaluate trajectory.'''
+        # Convert `t` into a NumPy array.
+        t = numpy.asarray(t)
+        ts = numpy.atleast_1d(t)
+        if ts.ndim > 1:
+            raise ValueError('`t` cannot have more than one dimension')
+
+        # Find interpolant indices.
+        i = numpy.fmax(
+            numpy.searchsorted(
+                self.ts[:-1], ts, side='right'
+            ) - 1,
+            0
+        )
+
+        # Convert to local parameters
+        x = self._scale[i] * (ts - self.ts[i]) + self.window[0]
+
+        # Broadcast local parameters for matrix multiplication.
+        x = x[:, *repeat(numpy.newaxis, self.coef.ndim - 1)]
+        x = numpy.broadcast_to(x, (*x.shape[:-1], self.coef.shape[-1] - 1))
+        x = numpy.cumprod(x, axis=-1)
+        x = x[..., numpy.newaxis]
+
+        # Evaluate polynomial values.
+        coef = self.coef[i, ..., numpy.newaxis, :]
+        f = coef[..., 0] + (coef[..., 1:] @ x).squeeze(-1)
+        f = f.squeeze(-1)
+
+        if t.ndim == 0:
+            f.squeeze(0)
+
+        return f
+
+    def piece_eval(self, ts: ArrayLike) -> NDArray:
         '''
-        Create dense output from an array-like of polynomials.
+        Evaluate individual pieces at a number of points simultaneously.
 
-        All polynomials should have a shared domain. The domain of the
-        `DenseOutput` object is the intersection of all polynomial domains.
+        :param ts: Time matrix with exactly as many rows as there are
+                   polynomials in the trajectory. Each polynomial is
+                   evaluated at the times in its corresponding row.
+        :type ts: 2-D array-like
 
-        :param poly: array-like of polynomials.
-        :type poly: array-like of polynomials
+        :return: An array of evaluated polynomial values. The first
+                 dimension corresponds to the polynomials, the second
+                 to the evaluation times.
+        :rtype: `numpy.ndarray` of shape `(n_p, n_t, *)`
         '''
-        poly = numpy.asarray(poly).flatten()
-        t_start = max((p.domain[0] for p in poly))
-        t_end = min((p.domain[1] for p in poly))
-        super().__init__(t_start, t_end)
+        # Convert time array if necessary.
+        ts = numpy.atleast_2d(numpy.asarray(ts))
+        if ts.ndim > 2:
+            raise ValueError('`ts` must be at most a 2-D array')
 
-        self.polynomials = copy.copy(poly)
+        # Build the cumulative product matrix.
+        n_deg = self.coef.shape[-1] - 1
+        xs = (
+            self._scale[:, numpy.newaxis] * (ts - self.ts[:-1, numpy.newaxis])
+            + self.window[0]
+        )
+        xs = xs[..., *repeat(numpy.newaxis, self.coef.ndim - 1)]
+        xs = numpy.broadcast_to(xs, (*xs.shape[:-1], n_deg))
+        xs = numpy.cumprod(xs, axis=-1)
 
-    def __call__(self, time: ArrayLike) -> NDArray:
-        '''Evaluate component polynomials at times.'''
-        time = numpy.asarray(time)
-        return numpy.stack([p(time) for p in self.polynomials])
+        # Compute the output values.
+        coef = self.coef[:, numpy.newaxis, ...]
+        fs = coef[..., 0] + (coef[..., numpy.newaxis, 1:]
+                             @ xs[..., numpy.newaxis]).squeeze((-2, -1))
 
-    def deriv(self, time: ArrayLike) -> NDArray:
-        '''Evaluate derivative of polynomials at times.'''
-        time = numpy.asarray(time)
-        return numpy.stack([p.deriv()(time) for p in self.polynomials])
+        return fs
+
+    def poly_deriv(self, n: int = 1) -> 'PolynomialTrajectory':
+        '''Return derivative as a piecewise polynomial.'''
+        if n < 0:
+            raise ValueError('`n` must be non-negative.')
+        if n == 0:
+            return self
+        if n > 1:
+            return self.poly_deriv().poly_deriv(n - 1)
+
+        # Return cached result if available.
+        if self._deriv is not None:
+            return self._deriv
+
+        # Get number of coefficients and short-circuit if constant polynomial
+        # should be returned.
+        n_coef = self.coef.shape[-1]
+        if n_coef < n:
+            poly = PolynomialTrajectory(
+                [self.t_min, self.t_max],
+                numpy.zeros((1, *self.coef.shape[1:-1], 1))
+            )
+            self._deriv = poly
+            return poly
+
+        # Calculate coefficients.
+        coef = (
+            self.coef[..., 1:]
+            * numpy.arange(1, n_coef)[*(numpy.newaxis
+                                        for _ in self.coef.shape[:-1]),
+                                      :]
+            / self._scale[:, *(numpy.newaxis for _ in self.coef.shape[1:])]
+        )
+
+        # Create new polynomial trajectory and cache result.
+        # Note: We could set `self` to be `_antideriv` of `poly`, but that
+        #       would cause circular references.
+        poly = PolynomialTrajectory(self.ts, coef, window=self.window,
+                                    mapscale=self._scale)
+        self._deriv = poly
+
+        return poly
+
+    def deriv(self, t: ArrayLike) -> NDArray:
+        '''Evaluate first derivative.'''
+        return self.poly_deriv()(t)
+
+    def poly_anti_deriv(self, n: int = 1) -> 'PolynomialTrajectory':
+        '''Return antiderivative as a piecewise polynomial.'''
+        if n < 0:
+            raise ValueError('`n` must be non-negative.')
+        if n == 0:
+            return self
+        if n > 1:
+            return self.poly_anti_deriv().poly_anti_deriv(n - 1)
+
+        # Return cached result if available.
+        if self._antideriv is not None:
+            return self._antideriv
+
+        # Get number of coefficients.
+        n_coef = self.coef.shape[-1]
+
+        # Calculate coefficients.
+        coef = numpy.empty((*self.coef.shape[:-1], self.coef.shape[-1] + 1))
+        coef[..., 1:] = self.coef / numpy.arange(1, n_coef + 1)[
+            *(numpy.newaxis for _ in self.coef.shape[:-1]), :
+        ]
+
+        # Calculate constant shift by cumulative sum.
+        _, x = self.window
+        if x in (0.0, 1.0):
+            x = numpy.broadcast_to(x, (n_coef,))
+        else:
+            x = numpy.cumprod(numpy.broadcast_to(x, (n_coef,)))
+        x = x[*(numpy.newaxis for _ in coef.shape[:-2]), :, numpy.newaxis]
+        coef[0, ..., 0] = 0.0
+        coef[1:, ..., 0] = numpy.cumsum(coef[1:, ..., 1:] @ x, axis=0)
+
+        # Create new polynomial trajectory and cache result.
+        poly = PolynomialTrajectory(self.ts, coef, window=self.window,
+                                    mapscale=self._scale)
+        self._antideriv = poly
+
+        return poly
+
+    def roots(self, fill: float | complex = numpy.nan) -> NDArray:
+        '''
+        Find roots of each polynomial.
+
+        This follows NumPy's approach of solving for the eigenvalues of
+        the companion matrix.
+        '''
+        # Construct an empty output array.
+        root = numpy.empty((*self.coef.shape[:-1], self.coef.shape[-1] - 1),
+                           dtype=complex)
+
+        # Iterate over polynomial degrees.
+        is_done = numpy.broadcast_to(False, self.coef.shape[:-1])
+        num_done = 0
+        num_poly = is_done.size
+
+        # Degrees above 0
+        for d in range(self.coef.shape[-1] - 1, 0, -1):
+            # Find polynomials of given degree.
+            flg = self.coef[..., d] != 0 & ~is_done
+
+            # Build companion matrices
+            sub_coef = self.coef[flg]
+            mat = numpy.empty((*sub_coef.shape[:-1], d, d))
+            mat[..., -1] = -sub_coef[..., :d] / sub_coef[..., d, numpy.newaxis]
+            mat[..., :-1] = 0.0
+
+            idx = numpy.arange(-1, d - 1)[*(numpy.newaxis
+                                            for _ in mat.shape[:-2]),
+                                          :]
+            idx[..., 0] = 0
+            val = numpy.ones((d,))[*(numpy.newaxis for _ in mat.shape[:-2]),
+                                   :]
+            val[..., 0] = 0.0
+            numpy.put_along_axis(mat, idx[..., numpy.newaxis],
+                                 val[..., numpy.newaxis], axis=-1)
+
+            # Solve for the eigenvalues of the companion matrix.
+            root[flg, :d] = numpy.linalg.eigvals(mat)
+            root[flg, d:] = fill
+
+            # Update done count
+            is_done = is_done | flg
+            num_done += numpy.sum(flg)
+            if num_done == num_poly:
+                break
+
+        # Fill out roots of zero-degree polynomials.
+        root[~is_done, :] = fill
+
+        # Convert roots back to original space.
+        root = (
+            (root - self.window[0])
+            / self._scale[:, numpy.newaxis]
+            + self.ts[:-1, numpy.newaxis]
+        )
+
+        return root
+
+    def convert(self, *, window: Optional[tuple[float, float]] = None,
+                time_grid: Optional[ArrayLike] = None
+                ) -> 'PolynomialTrajectory':
+        '''
+        Convert to a different parameter window or time grid.
+
+        :param window: New parameter window. The old window is used by
+                       default.
+        :type window: tuple of 2 floats, optional
+        :param time_grid: New time grid. Defaults to the old time grid.
+        :type time_grid: 1-D array-like, optional
+
+        ..warning::
+            The output of this method is undefined if `time_grid` is
+            not a refinement of the intersection of the trajectory's
+            prior time grid with the timespan of the new time grid,
+            i.e., if `time_grid` skips over one of the times in the old
+            time grid.
+        '''
+        # Short circuit if no change is necessary.
+        if (
+                (window is None or window == self.window)
+                and (time_grid is None
+                     or numpy.array_equiv(time_grid, self.ts))
+        ):
+            return self
+
+        # Substitute default values for arguments.
+        if window is None:
+            window = self.window
+        if time_grid is None:
+            time_grid = self.ts
+
+        # Convert time grid into a NumPy array.
+        time_grid = numpy.asarray(time_grid)
+
+        # Find relevant intervals.
+        ind = numpy.searchsorted(self.ts[1:], time_grid[:-1], side='right') - 1
+        ind = numpy.fmax(ind, 0)
+
+        # Set up the coefficient array and find parameters for start and end.
+        coef = self.coef[ind, ...]
+        n_coef = coef.shape[-1]
+        x0 = (time_grid[:-1] - self.ts[ind]) * self._scale[ind]
+        x1 = (time_grid[1:] - self.ts[ind]) * self._scale[ind]
+
+        # FIXME: Static type checker becomes confused about data types here.
+        x0 = cast(numpy.ndarray, x0)
+        x1 = cast(numpy.ndarray, x1)
+
+        # Calculate translation from new to old parameter window.
+        y0, y1 = window
+        scale = (x1 - x0) / (y1 - y0)
+        shift = x0 - scale * y0
+
+        scale_mat = numpy.cumprod(
+            numpy.flipud(numpy.tri(n_coef - 1))[
+                *(numpy.newaxis for _ in coef.shape[:-2]), ...
+            ]
+            * scale[:, *(numpy.newaxis for _ in coef.shape[1:])],
+            axis=-1
+        )
+
+        shift_mat = numpy.flip(
+            numpy.cumprod(
+                numpy.flip(
+                    numpy.flipud(numpy.tri(n_coef - 1))[
+                        *(numpy.newaxis for _ in coef.shape[:-2]), ...
+                    ]
+                    * shift[:, *(numpy.newaxis for _ in coef.shape[1:])],
+                    axis=-1
+                ),
+                axis=-1
+            ),
+            axis=-1
+        )
+
+        # Build change-of-parameter matrix.
+        mat = scipy.special.comb(
+            numpy.arange(n_coef - 1, -1, -1)[
+                *repeat(numpy.newaxis, n_coef - 2), :, numpy.newaxis
+            ],
+            numpy.arange(n_coef)[*repeat(numpy.newaxis, n_coef - 1), :]
+        )
+        mat[..., :-1, 1:] *= scale_mat
+        mat[..., :-1, :-1] *= shift_mat
+
+        # Return result.
+        return PolynomialTrajectory(time_grid, coef @ mat, window=window)
+
+    def __mul__(self, arg) -> 'PolynomialTrajectory | NotImplementedType':
+        if isinstance(arg, (float, int)):
+            return PolynomialTrajectory(self.ts, self.coef * arg,
+                                        window=self.window,
+                                        mapscale=self._scale)
+        return NotImplemented
+
+    def __truediv__(self, arg) -> 'PolynomialTrajectory | NotImplementedType':
+        if isinstance(arg, (float, int)):
+            return PolynomialTrajectory(self.ts, self.coef / arg,
+                                        window=self.window,
+                                        mapscale=self._scale)
+        return NotImplemented
+
+    def __neg__(self) -> 'PolynomialTrajectory':
+        return PolynomialTrajectory(self.ts, -self.coef,
+                                    window=self.window,
+                                    mapscale=self._scale)
+
+    def __add__(self, arg) -> 'PolynomialTrajectory | NotImplementedType':
+        if isinstance(arg, (float, int)):
+            coef = numpy.array(self.coef)
+            coef[..., 0] += arg
+            return PolynomialTrajectory(self.ts, coef,
+                                        window=self.window,
+                                        mapscale=self._scale)
+        if isinstance(arg, PolynomialTrajectory):
+            if arg.window != self.window or not numpy.array_equiv(arg.ts,
+                                                                  self.ts):
+                joint_time = sortednp.merge(arg.ts, self.ts,
+                                            duplicates=sortednp.DROP)
+                self = self.convert(time_grid=joint_time)
+                arg = arg.convert(window=self.window, time_grid=joint_time)
+            return PolynomialTrajectory(self.ts, self.coef + arg.coef,
+                                        window=self.window,
+                                        mapscale=self._scale)
+        return NotImplemented
+
+    def __radd__(self, arg) -> 'PolynomialTrajectory | NotImplementedType':
+        if isinstance(arg, (float, int, PolynomialTrajectory)):
+            return self.__add__(arg)
+        return NotImplemented
+
+    def __sub__(self, arg) -> 'PolynomialTrajectory | NotImplementedType':
+        if isinstance(arg, (float, int)):
+            coef = numpy.array(self.coef)
+            coef[..., 0] -= arg
+            return PolynomialTrajectory(self.ts, coef,
+                                        window=self.window,
+                                        mapscale=self._scale)
+        if isinstance(arg, PolynomialTrajectory):
+            if arg.window != self.window or not numpy.array_equiv(arg.ts,
+                                                                  self.ts):
+                joint_time = sortednp.merge(arg.ts, self.ts,
+                                            duplicates=sortednp.DROP)
+                self = self.convert(time_grid=joint_time)
+                arg = arg.convert(window=self.window, time_grid=joint_time)
+            return PolynomialTrajectory(self.ts, self.coef - arg.coef,
+                                        window=self.window,
+                                        mapscale=self._scale)
+        return NotImplemented
+
+    def __rsub__(self, arg) -> 'PolynomialTrajectory | NotImplementedType':
+        if isinstance(arg, (float, int)):
+            coef = -self.coef
+            coef[..., 0] += arg
+            return PolynomialTrajectory(self.ts, coef,
+                                        window=self.window,
+                                        mapscale=self._scale)
+        if isinstance(arg, PolynomialTrajectory):
+            return arg.__sub__(self)
+        return NotImplemented
 
 
 def midpoint_time_grid(time_grid: ArrayLike) -> numpy.ndarray:
@@ -76,7 +475,7 @@ def merge_time_grids(*grids: ArrayLike) -> numpy.ndarray:
 
 
 def polyfit_quartic(time: ArrayLike, value: ArrayLike, deriv: ArrayLike
-                    ) -> scipy.integrate.OdeSolution:
+                    ) -> PolynomialTrajectory:
     '''
     Fit a spline of quartic polynomials to calculated values and derivatives.
 
@@ -103,8 +502,7 @@ def polyfit_quartic(time: ArrayLike, value: ArrayLike, deriv: ArrayLike
                   if `m == 1`.
     :type deriv: array-like, shape `(m, n)`
 
-    :return: An `OdeSolution` object of :class:`PolynomialDenseOutput`
-             objects.
+    :return: An object of type :class:`PolynomialTrajectory`.
     '''
     # Convert inputs to numpy.ndarray.
     time = numpy.asarray(time)
@@ -156,13 +554,4 @@ def polyfit_quartic(time: ArrayLike, value: ArrayLike, deriv: ArrayLike
     poly_coeff = numpy.squeeze(mat @ poly_coeff[..., numpy.newaxis], -1)
 
     # Generate polynomial objects for each interval.
-    poly_arr = numpy.array([
-        [
-            numpy.polynomial.Polynomial(coef, window=(-1, 1), domain=(t0, t1))
-            for coef in poly_slice
-        ]
-        for poly_slice, t0, t1 in zip(poly_coeff, time[:-2:2], time[2::2])
-    ])
-    return scipy.integrate.OdeSolution(
-        time[::2], [PolynomialDenseOutput(poly) for poly in poly_arr]
-    )
+    return PolynomialTrajectory(time[::2], poly_coeff)

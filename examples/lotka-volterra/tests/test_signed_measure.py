@@ -2,11 +2,11 @@
 
 import math
 import unittest
+
 import numpy
 
-from numpy.polynomial import Polynomial
-
-from lotka_volterra.similarity_class import (
+from lotka_volterra.polyfit import PolynomialTrajectory
+from lotka_volterra.space import (
     IntervalSimilarityClass,
     IntervalSimilaritySpace,
     PolynomialSignedMeasure,
@@ -19,14 +19,16 @@ class TestSignedMeasure(unittest.TestCase):
         self.measures = [
             PolynomialSignedMeasure(
                 self.space,
-                [
-                    Polynomial([-2, -4, -1], domain=[-5, -1], window=[-5, -1]
-                               ),
-                    Polynomial([0, 0, 1], domain=[-1, 1], window=[-1, 1]),
-                    Polynomial([-2, 4, -1], domain=[1, 5], window=[1, 5]),
-                ]
+                PolynomialTrajectory(
+                    [-5, -1, 1, 5],
+                    [[1, 4, -4],
+                     [0, 0, 1],
+                     [1, -4, -4]],
+                    window=(-1, 1)
+                )
             ),
         ]
+
         self.levels = [1, 0, -1]
 
         self.gt_switch = [
@@ -78,6 +80,8 @@ class TestSignedMeasure(unittest.TestCase):
                     expected_class = IntervalSimilarityClass(m.space, expect)
                     actual_class = m > level
                     self.assertTrue(
+                        expected_class.switch_times.shape
+                        == actual_class.switch_times.shape and
                         numpy.allclose(actual_class.switch_times, expect),
                         f"Level set is {repr(actual_class)}; expected "
                         f"{repr(expected_class)}"
@@ -91,6 +95,8 @@ class TestSignedMeasure(unittest.TestCase):
                     expected_class = IntervalSimilarityClass(m.space, expect)
                     actual_class = m >= level
                     self.assertTrue(
+                        expected_class.switch_times.shape
+                        == actual_class.switch_times.shape and
                         numpy.allclose(actual_class.switch_times, expect),
                         f"Level set is {repr(actual_class)}; expected "
                         f"{repr(expected_class)}"
@@ -104,6 +110,8 @@ class TestSignedMeasure(unittest.TestCase):
                     expected_class = IntervalSimilarityClass(m.space, expect)
                     actual_class = m < level
                     self.assertTrue(
+                        expected_class.switch_times.shape
+                        == actual_class.switch_times.shape and
                         numpy.allclose(actual_class.switch_times, expect),
                         f"Level set is {repr(actual_class)}; expected "
                         f"{repr(expected_class)}"
@@ -117,6 +125,8 @@ class TestSignedMeasure(unittest.TestCase):
                     expected_class = IntervalSimilarityClass(m.space, expect)
                     actual_class = m <= level
                     self.assertTrue(
+                        expected_class.switch_times.shape
+                        == actual_class.switch_times.shape and
                         numpy.allclose(actual_class.switch_times, expect),
                         f"Level set is {repr(actual_class)}; expected "
                         f"{repr(expected_class)}"

@@ -18,7 +18,7 @@ Implementations of the basic unconstrained optimization loop.
 
 from dataclasses import dataclass
 import math
-from typing import Generic, Optional, TypeVar, cast
+from typing import IO, Generic, Optional, TypeVar, cast
 from warnings import warn
 
 from ..problem import Problem
@@ -59,15 +59,15 @@ class UnconstrainedSolver(Generic[Spc]):
 
         #: Trust region enlargement threshold. Must be strictly between
         #: `sigma_low` and 1.
-        sigma_high: float = 0.5
+        sigma_high: float = 0.9
 
         #: First error tuning parameter. Must be strictly between 0 and
         #: :code:`1 - sigma_low`.
-        zeta_1: float = 0.1
+        zeta_1: float = 0.5
 
         #: Second error tuning parameter. Must be strictly between 0 and
         #: 0.5.
-        zeta_2: float = 0.1
+        zeta_2: float = 0.01
 
         #: Initial trust region radius. This will be clamped to be a number
         #: strictly greater than 0 and less than or equal to the maximal step
@@ -151,7 +151,7 @@ class UnconstrainedSolver(Generic[Spc]):
     _step: UnconstrainedStepFinder[Spc]
 
     def __init__(self, problem: Problem[Spc],
-                 step_finder: UnconstrainedStepFinder[Spc]):
+                 step_finder: Optional[UnconstrainedStepFinder[Spc]] = None):
         if len(problem.constraints) > 0:
             raise ValueError('Cannot solve problem with constraints.')
 
@@ -182,6 +182,28 @@ class UnconstrainedSolver(Generic[Spc]):
     def solution(self) -> SimilarityClass:
         '''Current solution.'''
         return self._state.x
+
+    def _logline(self, iter: int, objval: float, instat: float,
+                 step: Optional[float] = None, tr_fail: Optional[int] = None,
+                 file: Optional[IO] = None, flush: bool = False):
+        '''
+        Output a single log line indicating the status of the solver.
+        '''
+        # Print header
+        if iter % 50 == 0:
+            print('iter |      obj      |     instat    |      step     | '
+                  'tr_fail', file=file)
+        print(f'{iter:4d} | {objval:13.6e} | {instat:13.6e} | ', end='',
+              file=file)
+        if step is None:
+            print('          --- | ', end='', file=file)
+        else:
+            print(f'{step:13.6e} | ', end='', file=file)
+        if tr_fail is None:
+            print('    ---', end='', file=file)
+        else:
+            print(f'{tr_fail:7d}', end='', file=file)
+        print(flush=flush, file=file)
 
     def _l1errbnd(self, tr_radius: float) -> float:
         '''
@@ -293,7 +315,7 @@ class UnconstrainedSolver(Generic[Spc]):
             errbnd = self._l1errbnd
             graderr_global = self._l1graderr_global
             graderr_local = self._l1graderr_local
-        elif problem.objective.grad_tol_type == 'linf':
+        elif problem.objective.grad_tol_type == 'linfty':
             errbnd = self._linferrbnd
             graderr_global = self._linfgraderr_global
             graderr_local = self._linfgraderr_local
@@ -307,19 +329,25 @@ class UnconstrainedSolver(Generic[Spc]):
             state.tr_radius = par.tr_radius
         if state.tr_radius <= 0.0:
             state.tr_radius = math.inf
-        state.tr_radius = max(state.tr_radius, problem.space.measure)
+        state.tr_radius = min(state.tr_radius, problem.space.measure)
 
         # Perform initial gradient evaluation if necessary.
         problem.objective.arg = state.x
         problem.objective.grad_tol = errbnd(state.tr_radius)
         state.g, state.e_g = problem.objective.get_gradient()
+        state.f, state.e_f = problem.objective.get_value()
 
+        # Calculate dual infeasibility.
+        full_step = state.g < 0.0
+        state.dual_inf = -state.g(full_step)
+        state.err_dual_inf = graderr_global(state.e_g)
+
+        # Output log line.
+        self._logline(stats.n_iter, state.f, state.dual_inf)
+
+        failed_tr_count = 0
         while (par.max_iter is None or stats.n_iter < par.max_iter):
-            # Calculate dual infeasibility and terminate if near-stationary.
-            full_step = state.g < 0.0
-            state.dual_inf = -state.g(full_step)
-            state.err_dual_inf = graderr_global(state.e_g)
-
+            # Terminate if near-stationary.
             if state.dual_inf <= par.abstol - state.err_dual_inf:
                 break
 
@@ -330,6 +358,7 @@ class UnconstrainedSolver(Generic[Spc]):
                 / problem.space.measure
                 * state.tr_radius
             )
+            step_finder.radius = state.tr_radius
             step, _ = step_finder.get_step()
 
             # Calculate projected objective change and error bound.
@@ -370,8 +399,20 @@ class UnconstrainedSolver(Generic[Spc]):
                 problem.objective.grad_tol = errbnd(state.tr_radius)
                 state.g, state.e_g = problem.objective.get_gradient()
 
+                # Calculate dual infeasibility.
+                full_step = state.g < 0.0
+                state.dual_inf = -state.g(full_step)
+                state.err_dual_inf = graderr_global(state.e_g)
+
+                # Output log line.
+                self._logline(stats.n_iter + 1, state.f, state.dual_inf,
+                              step.measure, failed_tr_count)
+
                 # Update stats.
                 stats.n_steps_accepted += 1
+
+                # Reset failed trust-region count.
+                failed_tr_count = 0
             else:
                 # Update trust region radius.
                 state.tr_radius /= 2
@@ -383,7 +424,20 @@ class UnconstrainedSolver(Generic[Spc]):
                 problem.objective.grad_tol = errbnd(state.tr_radius)
                 state.g, state.e_g = problem.objective.get_gradient()
 
+                # Calculate dual infeasibility.
+                full_step = state.g < 0.0
+                state.dual_inf = -state.g(full_step)
+                state.err_dual_inf = graderr_global(state.e_g)
+
                 # Update stats.
                 stats.n_steps_rejected += 1
 
+                # Increase failed trust-region count.
+                failed_tr_count += 1
+                print(f'DEBUG: rejection {failed_tr_count}', flush=True)
+                print(f'DEBUG: rho = {rho}', flush=True)
+                print(f'DEBUG: tr_radius = {2 * state.tr_radius}', flush=True)
+                print(f'DEBUG: step_size = {step.measure}', flush=True)
+
+            # Advance the iteration counter.
             stats.n_iter += 1

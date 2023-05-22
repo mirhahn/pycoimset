@@ -4,7 +4,7 @@ import unittest
 
 import numpy
 
-from lotka_volterra.similarity_class import (
+from lotka_volterra.space import (
     IntervalSimilarityClass,
     IntervalSimilaritySpace,
 )

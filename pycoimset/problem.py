@@ -53,10 +53,12 @@ class Problem(Generic[Spc]):
     _x0: Optional[SimilarityClass[Spc]]
 
     def __init__(self, space: Spc, objective: Functional[Spc],
-                 *constraints: Constraint[Spc]):
+                 *constraints: Constraint[Spc],
+                 initial_value: Optional[SimilarityClass[Spc]] = None):
         self._spc = space
         self._obj = objective
         self._con = constraints
+        self._x0 = initial_value
 
     @property
     def space(self) -> Spc:

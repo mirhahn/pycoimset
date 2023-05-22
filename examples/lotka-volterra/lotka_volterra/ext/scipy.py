@@ -39,6 +39,16 @@ def deriv_impl_rkdenseoutput(self, t: numpy.ndarray):
     return y
 
 
+def deriv_impl_constantdenseoutput(self, t: numpy.ndarray):
+    '''
+    Forward Jacobian implementation for SciPy's ConstantDenseOutput.
+    '''
+    if t.ndim == 0:
+        return numpy.zeros_like(self.value)
+    else:
+        return numpy.zeros((self.value.shape[0], t.shape[0]))
+
+
 def deriv_call_denseoutput(self, t):
     t = numpy.asarray(t)
     if t.ndim > 1:
@@ -163,6 +173,11 @@ def register_extensions():
         (
             scipy.integrate._ivp.rk.RkDenseOutput,
             deriv_impl_rkdenseoutput,
+            '_deriv_impl'
+        ),
+        (
+            scipy.integrate._ivp.base.ConstantDenseOutput,
+            deriv_impl_constantdenseoutput,
             '_deriv_impl'
         ),
         (

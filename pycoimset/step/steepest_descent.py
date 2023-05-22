@@ -89,7 +89,6 @@ class SteepestDescentStepFinder(UnconstrainedStepFinder[Spc]):
                                          > self._radius):
             self._result = None
 
-    @cache
     def get_step(self) -> tuple[SimilarityClass[Spc], float]:
         # Return cached result if available.
         if self._result is not None:
