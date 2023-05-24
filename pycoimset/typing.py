@@ -151,8 +151,12 @@ class SignedMeasure(Protocol[Spc]):
         ...
 
     def __rmul__(self, factor: float) -> 'SignedMeasure[Spc]':
-        '''Scale with a constant factor.'''
+        '''Scale with a given scalar.'''
         return self.__mul__(factor)
+
+    def __truediv__(self, divisor: float) -> 'SignedMeasure[Spc]':
+        '''Scale with reciprocal of a scalar.'''
+        ...
 
 
 class SimilaritySpace(Protocol[Spc]):

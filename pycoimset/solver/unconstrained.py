@@ -342,6 +342,10 @@ class UnconstrainedSolver(Generic[Spc]):
         state.dual_inf = -state.g(full_step)
         state.err_dual_inf = graderr_global(state.e_g)
 
+        # Complain if the sign of the dual infeasibility is wrong.
+        if state.dual_inf < 0:
+            raise RuntimeError('`dual_inf` may not be negative')
+
         # Output log line.
         self._logline(stats.n_iter, state.f, state.dual_inf)
 
@@ -404,12 +408,17 @@ class UnconstrainedSolver(Generic[Spc]):
                 state.dual_inf = -state.g(full_step)
                 state.err_dual_inf = graderr_global(state.e_g)
 
-                # Output log line.
-                self._logline(stats.n_iter + 1, state.f, state.dual_inf,
-                              step.measure, failed_tr_count)
+                # Complain if the sign of the dual infeasibility is wrong.
+                if state.dual_inf < 0:
+                    raise RuntimeError('`dual_inf` may not be negative')
 
                 # Update stats.
                 stats.n_steps_accepted += 1
+                stats.n_iter += 1
+
+                # Output log line.
+                self._logline(stats.n_iter, state.f, state.dual_inf,
+                              step.measure, failed_tr_count)
 
                 # Reset failed trust-region count.
                 failed_tr_count = 0
@@ -429,15 +438,12 @@ class UnconstrainedSolver(Generic[Spc]):
                 state.dual_inf = -state.g(full_step)
                 state.err_dual_inf = graderr_global(state.e_g)
 
+                # Complain if the sign of the dual infeasibility is wrong.
+                if state.dual_inf < 0:
+                    raise RuntimeError('`dual_inf` may not be negative')
+
                 # Update stats.
                 stats.n_steps_rejected += 1
 
                 # Increase failed trust-region count.
                 failed_tr_count += 1
-                print(f'DEBUG: rejection {failed_tr_count}', flush=True)
-                print(f'DEBUG: rho = {rho}', flush=True)
-                print(f'DEBUG: tr_radius = {2 * state.tr_radius}', flush=True)
-                print(f'DEBUG: step_size = {step.measure}', flush=True)
-
-            # Advance the iteration counter.
-            stats.n_iter += 1

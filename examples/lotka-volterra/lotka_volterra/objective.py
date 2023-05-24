@@ -16,7 +16,7 @@
 from dataclasses import dataclass, field
 import math
 from types import NoneType
-from typing import Literal, Optional, cast
+from typing import Literal, Optional
 
 import numpy
 from pycoimset.typing import Functional, SimilarityClass
@@ -101,7 +101,7 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
         adj_err: Optional[list[OdeSolution]] = None
 
         #: Unsigned gradient density.
-        grad_dens: Optional[list[OdeSolutionLike]] = None
+        grad_dens: Optional[list[PolynomialTrajectory]] = None
 
         #: Gradient density error solution.
         grad_dens_err: Optional[list[OdeSolution]] = None
@@ -236,8 +236,8 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
         if self._abstol is None or self._reltol is None:
             t0, tf = self._ivp.fwd.time_range
             dt = tf - t0
-            self._abstol = min(self.val_tol, self.grad_tol) / (10 * dt)
-            self._reltol = self._abstol
+            self._reltol = min(self.val_tol / dt, self.grad_tol / (2 * dt))
+            self._abstol = 1e-16
         return self._abstol, self._reltol
 
     @_inttol.setter
@@ -266,8 +266,6 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
 
         # Get integration tolerances.
         atol, rtol = self._inttol
-
-        print(f'DEBUG: val_tol is {self._valtol}', flush=True)
 
         # Perform forward simulation until tolerances are satisfied.
         val = math.nan
@@ -303,11 +301,9 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
                 self._ivp.fwd_err.fwd_sol = res.sol
 
                 # Solve error estimation initial value problem.
-                max_step = numpy.max(res.t[1:] - res.t[:-1]) / 2
                 res_err = solve_ivp(self._ivp.fwd_err, (t0, t1), e0,
                                     method='RK45', dense_output=True,
-                                    args=(w,), rtol=rtol, atol=atol,
-                                    max_step=max_step)
+                                    args=(w,), rtol=rtol, atol=atol)
 
                 # Handle integration errors.
                 if not res_err.success:
@@ -334,7 +330,6 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
                 break
 
             # Reduce integration tolerances.
-            atol *= self._valtol / (2 * val_err)
             rtol *= self._valtol / (2 * val_err)
             self._inttol = (atol, rtol)
 
@@ -366,13 +361,11 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
         # Retrieve integration tolerances.
         atol, rtol = self._inttol
 
-        print(f'DEBUG: grad_tol is {self._gradtol}', flush=True)
-
         # Perform adjoint simulation and gradient generation until tolerance
         # is satisfied.
         traj_adj: list[OdeSolution] = []
         traj_adj_err: list[OdeSolution] = []
-        traj_grad: list[OdeSolution] = []
+        traj_grad: list[PolynomialTrajectory] = []
         traj_grad_err: list[OdeSolution] = []
 
         while True:
@@ -495,6 +488,8 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
             if grad_err <= self._gradtol:
                 break
 
+            print(grad_err, flush=True)
+
             # Otherwise, reset trajectories, adjust integration tolerances,
             # force re-evaluation of objective value.
             traj_adj = []
@@ -502,7 +497,6 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
             traj_grad = []
             traj_grad_err = []
 
-            atol *= self._gradtol / (2 * grad_err)
             rtol *= self._gradtol / (2 * grad_err)
             self._inttol = (atol, rtol)
 
@@ -513,20 +507,22 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
         # Once done, store trajectories.
         self._traj.adj = traj_adj
         self._traj.adj_err = traj_adj_err
-        self._traj.grad_dens = cast(list[OdeSolutionLike], traj_grad)
+        self._traj.grad_dens = traj_grad
         self._traj.grad_dens_err = traj_grad_err
 
         # Generate signed measure from gradient density trajectory.
         poly = [
-            (1 - 2 * w) * numpy.array([
-                cast(PolynomialDenseOutput, dense).polynomials[0]
-                for dense in sol.interpolants
-            ])
-            for w, sol in zip(self._traj.ctrl,
-                              cast(list[OdeSolution], self._traj.grad_dens))
+            (1 - 2 * w) * sol
+            for w, sol in zip(self._traj.ctrl, self._traj.grad_dens)
         ]
+        time = numpy.concatenate([poly[0].ts] + [p.ts[1:] for p in poly[1:]])
+        coef = numpy.concatenate([p.coef.squeeze(1) for p in poly])
+        scale = numpy.concatenate([p._scale for p in poly])
         self._grad_result = (
-            PolynomialSignedMeasure(self._space, numpy.concatenate(poly)),
+            PolynomialSignedMeasure(
+                self._space,
+                PolynomialTrajectory(time, coef, mapscale=scale)
+            ),
             grad_err
         )
 

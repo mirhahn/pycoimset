@@ -172,10 +172,9 @@ class PolynomialTrajectory(OdeSolutionLike):
         # Calculate coefficients.
         coef = (
             self.coef[..., 1:]
-            * numpy.arange(1, n_coef)[*(numpy.newaxis
-                                        for _ in self.coef.shape[:-1]),
-                                      :]
-            / self._scale[:, *(numpy.newaxis for _ in self.coef.shape[1:])]
+            * numpy.arange(1, n_coef)[*repeat(numpy.newaxis,
+                                              self.coef.ndim - 1), :]
+            * self._scale[:, *repeat(numpy.newaxis, self.coef.ndim - 1)]
         )
 
         # Create new polynomial trajectory and cache result.
@@ -211,7 +210,7 @@ class PolynomialTrajectory(OdeSolutionLike):
         coef = numpy.empty((*self.coef.shape[:-1], self.coef.shape[-1] + 1))
         coef[..., 1:] = self.coef / numpy.arange(1, n_coef + 1)[
             *(numpy.newaxis for _ in self.coef.shape[:-1]), :
-        ]
+        ] / self._scale[:, *repeat(numpy.newaxis, self.coef.ndim - 1)]
 
         # Calculate constant shift by cumulative sum.
         _, x = self.window
@@ -221,7 +220,8 @@ class PolynomialTrajectory(OdeSolutionLike):
             x = numpy.cumprod(numpy.broadcast_to(x, (n_coef,)))
         x = x[*(numpy.newaxis for _ in coef.shape[:-2]), :, numpy.newaxis]
         coef[0, ..., 0] = 0.0
-        coef[1:, ..., 0] = numpy.cumsum(coef[1:, ..., 1:] @ x, axis=0)
+        coef[1:, ..., 0] = numpy.cumsum(coef[1:, ..., numpy.newaxis, 1:]
+                                        @ x, axis=0).squeeze((-2, -1))
 
         # Create new polynomial trajectory and cache result.
         poly = PolynomialTrajectory(self.ts, coef, window=self.window,
@@ -232,10 +232,16 @@ class PolynomialTrajectory(OdeSolutionLike):
 
     def roots(self, fill: float | complex = numpy.nan) -> NDArray:
         '''
-        Find roots of each polynomial.
+        Real roots of each polynomial.
 
-        This follows NumPy's approach of solving for the eigenvalues of
-        the companion matrix.
+        This only works for polynomials up to degree 4 and uses
+        Ferrari's method with an added Newton step for refinement. The
+        output array always has shape `(..., d)` where `...` is the
+        shape of the polynomial array and `d` is the maximal degree of
+        a polynomial in this trajectory.
+
+        Since not every polynomial has `d` real roots, the remaining
+        roots are replaced with `numpy.inf`.
         '''
         # Construct an empty output array.
         root = numpy.empty((*self.coef.shape[:-1], self.coef.shape[-1] - 1),
@@ -282,8 +288,10 @@ class PolynomialTrajectory(OdeSolutionLike):
 
         # Convert roots back to original space.
         root = (
-            (root - self.window[0])
-            / self._scale[:, numpy.newaxis]
+            (
+                (root - self.window[0])
+                / self._scale[:, numpy.newaxis]
+            )
             + self.ts[:-1, numpy.newaxis]
         )
 
@@ -380,6 +388,13 @@ class PolynomialTrajectory(OdeSolutionLike):
         return PolynomialTrajectory(time_grid, coef @ mat, window=window)
 
     def __mul__(self, arg) -> 'PolynomialTrajectory | NotImplementedType':
+        if isinstance(arg, (float, int)):
+            return PolynomialTrajectory(self.ts, self.coef * arg,
+                                        window=self.window,
+                                        mapscale=self._scale)
+        return NotImplemented
+
+    def __rmul__(self, arg) -> 'PolynomialTrajectory | NotImplementedType':
         if isinstance(arg, (float, int)):
             return PolynomialTrajectory(self.ts, self.coef * arg,
                                         window=self.window,

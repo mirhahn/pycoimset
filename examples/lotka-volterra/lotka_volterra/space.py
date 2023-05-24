@@ -3,6 +3,7 @@ Implementation of a similarity class.
 '''
 
 import copy
+from functools import cached_property
 from types import NotImplementedType
 from typing import Callable, Optional, Self, assert_type, cast, overload
 
@@ -228,7 +229,11 @@ class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace]):
     @property
     def measure(self) -> float:
         '''Measure of the class.'''
-        return numpy.sum(self.switch_times[1::2] - self.switch_times[::2])
+        measure = numpy.sum(self.switch_times[1::2]
+                  - self.switch_times[:-1:2])
+        if measure < 0:
+            raise RuntimeError()
+        return measure
 
     def __copy__(self) -> 'IntervalSimilarityClass':
         return IntervalSimilarityClass(self._space, self.switch_times)
@@ -241,13 +246,28 @@ class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace]):
     def subset(self, meas_low: float, meas_high: float,
                hint: Optional[SignedMeasure] = None
                ) -> 'IntervalSimilarityClass':
-        cum_meas = numpy.cumsum(self.switch_times[1:] - self.switch_times[:-1])
-        idx = numpy.searchsorted(cum_meas, meas_high, side='right')
-        times: list[ArrayLike] = [self.switch_times[:2 * idx - 1]]
-        times.append([meas_high - cum_meas[idx - 1]
-                      + self.switch_times[2 * idx - 2]])
-        switch_times = numpy.concatenate(times)
-        return IntervalSimilarityClass(self._space, switch_times)
+        # Calculate cumulative measure up to a member interval.
+        cum_meas = numpy.cumsum(self.switch_times[1::2]
+                                - self.switch_times[:-1:2])
+
+        # Find first insertion point for the high measure.
+        idx = numpy.searchsorted(cum_meas, meas_high, side='left')
+
+        # Catch edge case where the entire class is smaller than meas_high.
+        if idx == len(self.switch_times):
+            return self
+
+        # Keep all switching times up to the starting point of the
+        # first interval where the set would become too large.
+        head = self.switch_times[:2 * idx + 1]
+
+        # Add a single switching time based on meas_high.
+        res_meas = meas_high - cum_meas[idx - 1] if idx > 0 else meas_high
+        tail = [head[-1] + res_meas]
+
+        return IntervalSimilarityClass(
+            self._space, numpy.concatenate((head, tail))
+        )
 
     def __invert__(self) -> Self:
         '''Return complement of this class.'''
@@ -435,7 +455,7 @@ class PolynomialSignedMeasure(SignedMeasure[IntervalSimilaritySpace]):
         antideriv = self._poly.poly_anti_deriv()(simcls.switch_times)
 
         # Calculate measure.
-        return numpy.sum(antideriv[1:] - antideriv[:-1])
+        return numpy.sum(antideriv[1::2] - antideriv[:-1:2])
 
     def __levelset(self, cmp: Callable[[ArrayLike, ArrayLike], ArrayLike],
                    level: float) -> IntervalSimilarityClass:
@@ -445,11 +465,16 @@ class PolynomialSignedMeasure(SignedMeasure[IntervalSimilaritySpace]):
         time = poly.ts
 
         # Find roots of each polynomial.
+        # NOTE: We substitute a missing root with the imaginary unit,
+        #       which is subsequently ignored. It may be more desirable
+        #       to use a clearer indicator such as numpy.inf or
+        #       numpy.nan. However, these cause NumPy to throw
+        #       warnings.
         roots = numpy.concatenate(
             (
                 time[:-1].reshape((-1, 1)),
                 time[1:].reshape((-1, 1)),
-                poly.roots(fill=numpy.inf)
+                poly.roots(fill=1j)
             ),
             axis=1)
         dom_start, dom_end = roots[:, 0], roots[:, 1]

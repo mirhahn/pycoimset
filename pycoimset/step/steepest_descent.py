@@ -16,7 +16,6 @@
 Steepest descent step finding.
 '''
 
-from functools import cache
 import math
 from typing import Optional, TypeVar
 
@@ -134,9 +133,8 @@ class SteepestDescentStepFinder(UnconstrainedStepFinder[Spc]):
         step = lb
         step_measure = step.measure
 
-        min_size = radius - (tol - radius * (ub_lvl - lb_lvl) / abs(lb_lvl)) \
-            - step_measure
         max_size = radius - step_measure
+        min_size = max_size - (tol - radius * (ub_lvl - lb_lvl)) / abs(lb_lvl)
 
         # If the base step is too small, then we proceed to fill it out with
         # filler sets. We apportion the filler set to the components based on

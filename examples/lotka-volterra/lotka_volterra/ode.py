@@ -8,6 +8,8 @@ import numpy
 from numpy.typing import ArrayLike
 import scipy.integrate
 
+from .typing import OdeSolutionLike
+
 
 __all__ = [
     'LotkaForwardIVP',
@@ -643,7 +645,7 @@ class LotkaGradientDensityErrorIVP:
     grad_dens: LotkaGradientDensity
 
     #: Gradient density trajectory.
-    grad_dens_traj: Optional[scipy.integrate.OdeSolution]
+    grad_dens_traj: Optional[OdeSolutionLike]
 
     def __init__(self, grad_dens: LotkaGradientDensity):
         '''
