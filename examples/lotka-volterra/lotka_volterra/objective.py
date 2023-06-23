@@ -16,10 +16,10 @@
 from dataclasses import dataclass, field
 import math
 from types import NoneType
-from typing import Literal, Optional
+from typing import Optional
 
 import numpy
-from pycoimset.typing import Functional, SimilarityClass
+from pycoimset.typing import ErrorNorm, Functional, SimilarityClass
 from scipy.integrate import OdeSolution, solve_ivp
 
 from .ode import (
@@ -41,7 +41,6 @@ from .space import (
     IntervalSimilaritySpace,
     PolynomialSignedMeasure,
 )         # pyright: ignore # noqa
-from .typing import OdeSolutionLike
 
 __all__ = ['LotkaObjectiveFunctional']
 
@@ -227,8 +226,8 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
             self._traj.clear_grad()
 
     @property
-    def grad_tol_type(self) -> Literal['l1', 'linfty']:
-        return 'linfty'
+    def grad_tol_type(self) -> ErrorNorm:
+        return ErrorNorm.Linfty
 
     @property
     def _inttol(self) -> tuple[float, float]:
@@ -236,8 +235,8 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
         if self._abstol is None or self._reltol is None:
             t0, tf = self._ivp.fwd.time_range
             dt = tf - t0
-            self._reltol = min(self.val_tol / dt, self.grad_tol / (2 * dt))
-            self._abstol = 1e-16
+            self._reltol = float(100 * numpy.finfo(float).eps)
+            self._abstol = min(self.val_tol / dt, self.grad_tol / (2 * dt), 1e-6)
         return self._abstol, self._reltol
 
     @_inttol.setter
@@ -330,7 +329,7 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
                 break
 
             # Reduce integration tolerances.
-            rtol *= self._valtol / (2 * val_err)
+            atol *= self._valtol / (2 * val_err)
             self._inttol = (atol, rtol)
 
             traj_ctrl = []
@@ -488,8 +487,6 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
             if grad_err <= self._gradtol:
                 break
 
-            print(grad_err, flush=True)
-
             # Otherwise, reset trajectories, adjust integration tolerances,
             # force re-evaluation of objective value.
             traj_adj = []
@@ -497,7 +494,7 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
             traj_grad = []
             traj_grad_err = []
 
-            rtol *= self._gradtol / (2 * grad_err)
+            atol *= self._gradtol / (2 * grad_err)
             self._inttol = (atol, rtol)
 
             self._val_result = None

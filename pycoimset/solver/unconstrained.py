@@ -16,434 +16,567 @@
 Implementations of the basic unconstrained optimization loop.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import IntEnum
 import math
-from typing import IO, Generic, Optional, TypeVar, cast
-from warnings import warn
+from types import NotImplementedType
+from typing import Generic, NamedTuple, Optional, TypeVar, cast
+import typing
 
-from ..problem import Problem
+import numpy
+
+from ..logging import TabularLogger
 from ..step import SteepestDescentStepFinder
 from ..typing import (
+    ErrorNorm,
+    Functional,
     SignedMeasure,
     SimilarityClass,
     SimilaritySpace,
     UnconstrainedStepFinder,
 )
 
-__all__ = ['UnconstrainedSolver']
+__all__ = ['Solver']
 
 
 Spc = TypeVar('Spc', bound=SimilaritySpace)
-OtherSpc = TypeVar('OtherSpc', bound=SimilaritySpace)
+T = TypeVar('T')
 
 
-class UnconstrainedSolver(Generic[Spc]):
+@dataclass
+class SolverParameters:
+    '''
+    User specified parameters for the algorithm.
+
+    Attributes
+    ----------
+    abstol : float
+        Absolute instationarity tolerance. Reference value for the
+        termination criterion. Defaults to ``1e-3``.
+    thres_accept : float
+        Model quality threshold above which steps are accepted. Defaults
+        to ``0.2``.
+    '''
+
+    #: Absolute stationarity tolerance.
+    abstol: float = 1e-3
+
+    #: Acceptance threshold. Must be in (0, 1).
+    thres_accept: float = 0.2
+
+    #: Trust region reduction threshold. Must be strictly between
+    #: `thres_accept` and 1.
+    thres_reject: float = 0.4
+
+    #: Trust region enlargement threshold. Must be strictly between
+    #: `thres_reject` and 1.
+    thres_tr_expand: float = 0.6
+
+    #: Error tuning parameter. Regulates the ratio between a step's
+    #: projected descent and the maximum guaranteeable projected
+    #: descent. Must be strictly between 0 and 1.
+    margin_step: float = 0.5
+
+    #: Error tuning parameter. Regulates the relative error of the
+    #: projected descent for the given step. Must be strictly between
+    #: 0 and 1.
+    margin_proj_desc: float = 0.1
+
+    #: Error tuning parameter. Regulates the ratio between
+    #: instationarity error and absolute termination tolerance.
+    #: Must be strictly between 0 and 1.
+    margin_instat: float = 0.5
+
+    #: Initial trust region radius. This will be clamped to be a number
+    #: strictly greater than 0 and less than or equal to the maximal step
+    #: size possible in the variable space upon initialization.
+    tr_radius: float = math.inf
+
+    #: Maximum number of iterations.
+    max_iter: Optional[int] = None
+
+    def sanitize(self) -> None:
+        '''
+        Sanitizes parameters.
+        '''
+        if self.max_iter is not None and self.max_iter < 0:
+            self.max_iter = None
+
+        if self.tr_radius <= 0.0:
+            self.tr_radius = math.inf
+
+        if self.margin_step <= 0.0 or self.margin_step >= 1.0:
+            self.margin_step = 0.5
+
+        if self.margin_proj_desc <= 0.0 or self.margin_proj_desc >= 1.0:
+            self.margin_proj_desc = 0.1
+
+        if self.margin_instat <= 0.0 or self.margin_instat >= 1.0:
+            self.margin_instat = 0.5
+
+        if self.thres_reject <= 0.0 or self.thres_reject >= 1.0:
+            self.thres_reject = 0.4
+
+        if (self.thres_accept <= 0.0
+                or self.thres_accept >= self.thres_reject):
+            self.thres_accept = self.thres_reject / 2
+
+        if (self.thres_tr_expand <= self.thres_accept
+                or self.thres_accept >= 1.0):
+            self.thes_tr_expand = (self.thres_accept + 1.0) / 2
+
+        if self.abstol <= 0.0:
+            self.abstol = 1e-3
+
+
+@dataclass(slots=True)
+class SolverStats:
+    '''
+    Statistics collected during the optimization loop.
+
+    This is useful for post-optimization performance evaluation. The
+    structure can be re-used in subsequent runs.
+    '''
+
+    #: Total number of iterations including both accepted and rejected
+    #: steps.
+    n_iter: int = 0
+
+    #: Total wall time spent in the optimization loop (in seconds).
+    t_total: float = 0.0
+
+    def __add__(self, other) -> 'SolverStats | NotImplementedType':
+        if not isinstance(other, SolverStats):
+            return NotImplemented
+        return SolverStats(
+            n_iter=self.n_iter + other.n_iter,
+            t_total=self.t_total + other.t_total,
+        )
+
+
+class SolverStatus(IntEnum):
+    RUNNING = 0
+    STATIONARY = 1
+    ERROR_UNKNOWN = 64,
+    ERROR_INTERRUPTED = 65
+    ERROR_PRECISION = 66
+    ERROR_MAX_ITER = 67
+
+    @property
+    def is_running(self) -> bool:
+        return self == SolverStatus.RUNNING
+
+    @property
+    def is_error(self) -> bool:
+        return self >= SolverStatus.ERROR_UNKNOWN
+
+
+class ValueErrorPair(NamedTuple, Generic[T]):
+    value: T
+    error: float
+
+
+class Solution(Generic[Spc]):
+    '''
+    Representation of a solution to an optimization problem.
+
+    A solution consists of a point in search space (i.e., a similarity
+    class) alongside potential evaluation results for objective
+    function and gradient.
+    '''
+    _func: Functional[Spc]
+    _arg: SimilarityClass[Spc]
+    _valtol: float
+    _gradtol: float
+    _val: Optional[ValueErrorPair[float]]
+    _grad: Optional[ValueErrorPair[SignedMeasure[Spc]]]
+    _fullstep: Optional[SimilarityClass[Spc]]
+    _instat: Optional[ValueErrorPair[float]]
+
+    def __init__(self, func: Functional[Spc], arg: SimilarityClass[Spc]):
+        self._func = func
+        self._arg = arg
+        self._valtol = math.inf
+        self._gradtol = math.inf
+        self._val = None
+        self._grad = None
+        self._fullstep = None
+        self._instat = None
+
+    @property
+    def arg(self) -> SimilarityClass[Spc]:
+        '''Argument for the objective functional.'''
+        return self._arg
+
+    @property
+    def val_tol(self) -> float:
+        '''Error tolerance for objective values.'''
+        return self._valtol
+
+    @val_tol.setter
+    def val_tol(self, tol: float) -> None:
+        if tol <= 0.0:
+            raise ValueError('tolerance must be strictly positive')
+        self._valtol = tol
+        if self._val is not None and self._val.error > tol:
+            self._val = None
+
+    @property
+    def grad_tol(self) -> float:
+        '''Error tolerance for gradients.'''
+        return self._gradtol
+
+    @grad_tol.setter
+    def grad_tol(self, tol: float) -> None:
+        if tol <= 0.0:
+            raise ValueError('tolerance must be strictly positive')
+        self._gradtol = tol
+        if self._grad is not None and self._grad.error > tol:
+            self._grad = None
+            self._fullstep = None
+            self._instat = None
+
+    @property
+    def val(self) -> ValueErrorPair[float]:
+        '''Objective function value.'''
+        if self._val is not None:
+            return self._val
+
+        self._func.arg = self._arg
+        self._func.val_tol = self._valtol
+        self._func.grad_tol = self._gradtol
+        self._val = ValueErrorPair[float](*self._func.get_value())
+
+        return self._val
+
+    @property
+    def grad(self) -> ValueErrorPair[SignedMeasure[Spc]]:
+        '''Gradient value.'''
+        if self._grad is not None:
+            return self._grad
+
+        self._func.arg = self._arg
+        self._func.val_tol = self._valtol
+        self._func.grad_tol = self._gradtol
+        self._grad = ValueErrorPair[SignedMeasure[Spc]](
+            *self._func.get_gradient()
+        )
+
+        return self._grad
+
+    @property
+    def full_step(self) -> SimilarityClass[Spc]:
+        '''Full step.'''
+        if self._fullstep is not None:
+            return self._fullstep
+
+        grad = self.grad
+        self._fullstep = grad.value < 0.0
+
+        return self._fullstep
+
+    @property
+    def instationarity(self) -> ValueErrorPair[float]:
+        '''Approximate instationarity.'''
+        if self._instat is not None:
+            return self._instat
+
+        grad = self.grad
+        step = self.full_step
+        norm = self._func.grad_tol_type
+        self._instat = ValueErrorPair[float](
+            -grad.value(step),
+            norm.estimated_error(step.measure, grad.error)
+        )
+
+        return self._instat
+
+
+class Solver(Generic[Spc]):
     """
     Unconstrained optimization loop.
 
     This is a barebones implementation of the controlled descent framework
     presented in Section 3.1 of the thesis.
     """
+    #: Problem description.
+    objective: Functional[Spc]
 
-    @dataclass
-    class Parameters:
-        '''
-        User specified parameters for the algorithm.
-        '''
+    #: Step finder.
+    step_finder: UnconstrainedStepFinder[Spc]
 
-        #: Absolute stationarity tolerance.
-        abstol: float = 1e-3
+    #: Current status flag.
+    status: SolverStatus
 
-        #: Trust region reduction threshold. Must be strictly between 0 and 1.
-        sigma_low: float = 0.1
+    #: Parameters.
+    param: SolverParameters
 
-        #: Trust region enlargement threshold. Must be strictly between
-        #: `sigma_low` and 1.
-        sigma_high: float = 0.9
+    #: Statistics.
+    stats: SolverStats
 
-        #: First error tuning parameter. Must be strictly between 0 and
-        #: :code:`1 - sigma_low`.
-        zeta_1: float = 0.5
+    #: Current trust region radius.
+    radius: float
 
-        #: Second error tuning parameter. Must be strictly between 0 and
-        #: 0.5.
-        zeta_2: float = 0.01
+    #: Current solution.
+    solution: Solution[Spc]
 
-        #: Initial trust region radius. This will be clamped to be a number
-        #: strictly greater than 0 and less than or equal to the maximal step
-        #: size possible in the variable space upon initialization.
-        tr_radius: float = math.inf
+    #: Estimate of objective curvature.
+    curvature: float
 
-        #: Maximum number of iterations.
-        max_iter: Optional[int] = None
+    #: Logger for tabular output.
+    logger: TabularLogger
 
-    @dataclass
-    class State(Generic[OtherSpc]):
-        '''
-        Internal state maintained during iteration.
-        '''
-
-        #: Variable values.
-        x: SimilarityClass[OtherSpc]
-
-        #: Objective function value during last evaluation.
-        f: Optional[float] = None
-
-        #: Objective function error bound during last evaluation.
-        e_f: Optional[float] = None
-
-        #: Gradient measures obtained during last evaluation.
-        g: Optional[SignedMeasure] = None
-
-        #: Gradient error obtained during last evaluation. The precise meaning
-        #: of this number differs based on whether the objective functional is
-        #: :math:`L^1` or :math:`L^\infty` controlled.
-        e_g: Optional[float] = None
-
-        #: Instationarity measure during last evaluation.
-        dual_inf: Optional[float] = None
-
-        #: Error of instationarity measure during last evaluation.
-        err_dual_inf: Optional[float] = None
-
-        #: Current trust region radius.
-        tr_radius: Optional[float] = None
-
-    @dataclass
-    class Stats:
-        '''
-        Statistics collected during the optimization loop.
-
-        This is useful for post-optimization performance evaluation. The
-        structure can be re-used in subsequent runs. In this case, statistics
-        accumulate.
-        '''
-
-        #: Total number of iterations including both accepted and rejected
-        #: steps.
-        n_iter: int = 0
-
-        #: Number of objective function evaluations.
-        n_fun_eval: int = 0
-
-        #: Number of gradient evaluations.
-        n_grad_eval: int = 0
-
-        #: Number of times that a step was accepted.
-        n_steps_accepted: int = 0
-
-        #: Number of times that a step was rejected.
-        n_steps_rejected: int = 0
-
-        #: Total wall time spent in the optimization loop (in seconds).
-        t_total: float = 0.0
-
-        #: Total wall time spent evaluating the objective (in seconds).
-        t_fun_eval: float = 0.0
-
-        #: Total wall time spent evaluating the gradient (in seconds).
-        t_grad_eval: float = 0.0
-
-    _prob: Problem[Spc]
-    _param: Parameters
-    _state: State[Spc]
-    _stats: Stats
-    _step: UnconstrainedStepFinder[Spc]
-
-    def __init__(self, problem: Problem[Spc],
-                 step_finder: Optional[UnconstrainedStepFinder[Spc]] = None):
-        if len(problem.constraints) > 0:
-            raise ValueError('Cannot solve problem with constraints.')
-
-        # Store a reference to the problem.
-        self._prob = problem
-
-        # Set up parameter structure.
-        self._param = UnconstrainedSolver.Parameters()
-
-        # Set up the internal state.
-        self._state = UnconstrainedSolver.State(x=problem.initial_value)
-
-        # Set up stats.
-        self._stats = UnconstrainedSolver.Stats()
+    def __init__(self, obj_func: Functional[Spc],
+                 step_finder: Optional[UnconstrainedStepFinder[Spc]] = None,
+                 initial_sol: Optional[SimilarityClass[Spc]] = None,
+                 param: Optional[SolverParameters] = None,
+                 **kwargs):
+        # Retain reference to objective.
+        self.objective = obj_func
 
         # Set up step finder.
         if step_finder is None:
-            self._step = SteepestDescentStepFinder[Spc]()
+            self.step_finder = SteepestDescentStepFinder[Spc]()
         else:
-            self._step = step_finder
+            self.step_finder = step_finder
 
-    @property
-    def param(self) -> Parameters:
-        '''Algorithmic parameters.'''
-        return self._param
+        # Set up solution.
+        if initial_sol is None:
+            initial_sol = obj_func.input_space.empty_class
+        self.solution = Solution[Spc](self.objective, initial_sol)
 
-    @property
-    def solution(self) -> SimilarityClass:
-        '''Current solution.'''
-        return self._state.x
-
-    def _logline(self, iter: int, objval: float, instat: float,
-                 step: Optional[float] = None, tr_fail: Optional[int] = None,
-                 file: Optional[IO] = None, flush: bool = False):
-        '''
-        Output a single log line indicating the status of the solver.
-        '''
-        # Print header
-        if iter % 50 == 0:
-            print('iter |      obj      |     instat    |      step     | '
-                  'tr_fail', file=file)
-        print(f'{iter:4d} | {objval:13.6e} | {instat:13.6e} | ', end='',
-              file=file)
-        if step is None:
-            print('          --- | ', end='', file=file)
+        # Set up parameter structure.
+        if param is not None:
+            self.param = param
         else:
-            print(f'{step:13.6e} | ', end='', file=file)
-        if tr_fail is None:
-            print('    ---', end='', file=file)
-        else:
-            print(f'{tr_fail:7d}', end='', file=file)
-        print(flush=flush, file=file)
+            self.param = SolverParameters(**kwargs)
 
-    def _l1errbnd(self, tr_radius: float) -> float:
-        '''
-        Gradient error bound for :math:`L^1` controlled functional.
+        # Set up remaining data.
+        self.status = SolverStatus.RUNNING
+        self.radius = max(0.0, min(self.param.tr_radius,
+                                   obj_func.input_space.measure))
+        self.curvature = 0.0
+        self.stats = SolverStats()
 
-        This is an internal function. You should not call it directly.
-        '''
-        return self._param.abstol * min(
-            self._param.zeta_2,
-            (
-                self._param.zeta_1
-                * (1 - 2 * self._param.zeta_2)
-                * self._step.quality
-            ) / (
-                self._prob.space.measure
-                * (1 + self._param.zeta_1)
-            ) * tr_radius
+        # Sanitize parameters.
+        self.param.sanitize()
+
+        # Set up logger.
+        self.logger = TabularLogger(
+            cols=['iter', 'obj', 'instat', 'step', 'tr_fail'],
+            format={
+                'iter': '4d',
+                'obj': '13.6e',
+                'instat': '13.6e',
+                'step': '13.6e',
+                'tr_fail': '7d'
+            },
+            width={
+                'iter': 4,
+                'obj': 13,
+                'instat': 13,
+                'step': 13,
+                'tr_fail': 7
+            },
+            flush=True
         )
 
-    def _l1graderr_global(self, err_bnd: float) -> float:
+    def _tolerances(self,
+                    tau: Optional[float] = None,
+                    rho: Optional[float] = None
+                    ) -> tuple[float, float, float]:
         '''
-        Gradient error bound valid for all product similarity classes.
+        Choose appropriate error tolerances.
 
-        This is an internal function. You should not call it directly. This
-        variant is intended for use with :math:`L^1` controlled functionals.
-        '''
-        return err_bnd
+        This method is used by the optimization loop to determine
+        evaluation error margins for the objective functional. It uses
+        prior guesses for instationarity and step quality.
 
-    def _l1graderr_local(self, err_bnd: float, _: SimilarityClass) -> float:
-        '''
-        Gradient error bound valid for a specific product similarity class.
+        Parameters
+        ----------
+        tau : float, optional
+            Anticipated unsigned instationarity.
+        rho : float, optional
+            Anticipated step quality.
 
-        This is an internal function. You should not call it directly. This
-        variant is intended for use with :math:`L^1` controlled functionals.
+        Returns
+        -------
+        tuple[float, float, float]
+            Objective error tolerance, gradient error tolerance, and step
+            error tolerance in that order.
         '''
-        return err_bnd
+        # Get parameters.
+        eps = self.param.abstol
+        xi_step = self.param.margin_step
+        xi_prdesc = self.param.margin_proj_desc
+        xi_instat = self.param.margin_instat
+        step_quality = self.step_finder.quality
+        radius = self.radius
+        mu_full = self.solution.full_step.measure
+        norm = self.objective.grad_tol_type
 
-    def _linferrbnd(self, _: float) -> float:
-        '''
-        Gradient error bound for :math:`L^\\infty` controlled functional.
+        # Guess instationarity if no guess is given.
+        if tau is None:
+            tau = max(eps, self.solution.instationarity.value)
 
-        This is an internal function. You should not call it directly.
-        '''
-        max_step = self._prob.space.measure
-        return self._param.abstol * min(
-            self._param.zeta_2 / max_step,
-            (
-                self._param.zeta_1
-                * (1 - 2 * self._param.zeta_2)
-                * self._step.quality
-            ) / (max_step * (1 + self._param.zeta_1))
+        # Calculate lower bound for projected descent.
+        expected_step_ratio = step_quality * min(
+            1.0, radius / mu_full
         )
+        proj_desc_min = (1.0 - xi_step) * expected_step_ratio * tau
 
-    def _linfgraderr_global(self, err_bnd: float) -> float:
+        # Guess step quality if no guess is given
+        if rho is None:
+            rho = 1.0 - (
+                self.curvature * min(radius, mu_full)**2 / (2 * proj_desc_min)
+            )
+
+        # Calculate gradient error tolerance.
+        grad_tol_step = norm.required_tolerance(
+            radius, xi_prdesc * proj_desc_min
+        )
+        grad_tol_full = norm.required_tolerance(
+            mu_full, xi_instat * max(tau - eps, eps)
+        )
+        grad_tol = min(grad_tol_step, grad_tol_full)
+
+        # Calculate objective error tolerance.
+        sigma_0 = self.param.thres_accept
+        sigma_1 = self.param.thres_reject
+        rho_tol = max(rho - sigma_0, sigma_1 - rho, (sigma_1 - sigma_0) / 4)
+        obj_tol = rho_tol * proj_desc_min / 2
+
+        # Calculate step tolerance.
+        step_tol = xi_step * expected_step_ratio * tau
+
+        return obj_tol, grad_tol, step_tol
+
+    def _update_curvature(self, step_size: float, projected_descent: float,
+                          actual_descent: float) -> None:
         '''
-        Gradient error bound valid for all product similarity classes.
+        Update curvature estimate.
 
-        This is an internal function. You should not call it directly. This
-        variant is intended for use with :math:`L^\\infty` controlled
-        functionals.
+        Parameters
+        ----------
+        step_size : float
+            Measure of the step.
+        projected_descent : float
+            Projected descent given the linear model function.
+        actual_descent : float
+            Actual descent associated with the step.
         '''
-        return err_bnd * self._prob.space.measure
+        curvature = 2 * (actual_descent - projected_descent) / step_size**2
+        if math.isfinite(curvature) and curvature >= 0.0:
+            self.curvature = 0.9 * self.curvature + 0.1 * curvature
 
-    def _linfgraderr_local(self, err_bnd: float, cls: SimilarityClass
-                           ) -> float:
+    def step(self) -> None:
         '''
-        Gradient error bound valid for a specific product similarity class.
-
-        This is an internal function. You should not call it directly. This
-        variant is intended for use with :math:`L^\\infty` controlled
-        functionals.
+        Perform a single optimization step.
         '''
-        return err_bnd * cls.measure
+        # Get error norm.
+        err_norm = self.objective.grad_tol_type
 
-    def solve(self):
+        # Evaluate instationarity.
+        while True:
+            tau = self.solution.instationarity
+            obj_tol, grad_tol, step_tol = self._tolerances()
+            if tau.error <= self.param.margin_instat * max(
+                tau.value - self.param.abstol, self.param.abstol
+            ):
+                break
+            self.solution.val_tol = obj_tol
+            self.solution.grad_tol = grad_tol
+
+        # Perform stationarity test.
+        if tau.value <= self.param.abstol:
+            self.status = SolverStatus.STATIONARY
+            return
+
+        n_reject = 0
+        accepted = False
+        while not accepted:
+            # Find step.
+            self.step_finder.gradient = self.solution.grad.value
+            self.step_finder.radius = self.radius
+            self.step_finder.tolerance = step_tol
+            step, _ = self.step_finder.get_step()
+
+            # Find projected change.
+            proj_chg = self.solution.grad.value(step)
+            proj_chg_error = err_norm.estimated_error(
+                step.measure, self.solution.grad.error
+            )
+            if proj_chg_error > self.param.margin_proj_desc * abs(proj_chg):
+                obj_tol, grad_tol, step_tol = self._tolerances(tau.value, None)
+                self.solution.val_tol = obj_tol
+                self.solution.grad_tol = grad_tol
+                continue
+
+            # Calculate step quality.
+            new_sol = Solution(self.objective, self.solution.arg ^ step)
+            new_sol.val_tol = obj_tol
+            new_sol.grad_tol = grad_tol
+            step_quality = ((new_sol.val.value - self.solution.val.value)
+                / proj_chg)
+            step_quality_err = ((self.solution.val.error + new_sol.val.error)
+                / abs(proj_chg))
+
+            # Assess whether or not to accept.
+            if step_quality - step_quality_err >= self.param.thres_accept:
+                # Accept new solution.
+                self.solution = new_sol
+
+                # Increment iteration counter and output log line.
+                self.stats.n_iter += 1
+                self.logger.push_line(
+                    iter=self.stats.n_iter,
+                    obj=self.solution.val.value,
+                    instat=self.solution.instationarity.value,
+                    step=step.measure,
+                    tr_fail=n_reject
+                )
+
+                # Check whether to increase the trust region radius.
+                if step_quality >= self.param.thres_tr_expand:
+                    self.radius = min(
+                        self.objective.input_space.measure, 2 * self.radius
+                    )
+
+                accepted = True
+            elif step_quality + step_quality_err < self.param.thres_reject:
+                # Decrease trust region radius.
+                self.radius /= 2
+
+                if self.radius < 1000 * numpy.finfo(float).eps:
+                    self.status = SolverStatus.ERROR_PRECISION
+                    return
+
+                # Increase rejection counter.
+                n_reject += 1
+
+            # Adjust error tolerances.
+            obj_tol, grad_tol, step_tol = self._tolerances(tau.value, step_quality)
+            self.solution.val_tol = obj_tol
+            self.solution.grad_tol = grad_tol
+
+    def solve(self) -> None:
         '''
         Run the main optimization loop.
         '''
-        # Introduce shorthands for the four data objects.
-        problem = self._prob
-        par = self._param
-        state = self._state
-        stats = self._stats
-        step_finder = self._step
+        # Print initial log line.
+        self.logger.push_line(
+            iter=self.stats.n_iter,
+            obj=self.solution.val.value,
+            instat=self.solution.instationarity.value
+        )
 
-        # Sanitize parameters.
-        if par.abstol <= 0.0:
-            par.abstol = 1e-3
-            warn('param.abstol must be strictly positive (reset to 1e-3)')
-        if par.sigma_low <= 0 or par.sigma_low >= 1:
-            par.sigma_low = 0.1
-            warn('param.sigma_low must be strictly between 0 and 1 (reset to '
-                 '0.1)')
-        if par.sigma_high <= par.sigma_low:
-            par.sigma_high = 2 * par.sigma_low
-            warn('param.sigma_high must be greater than param.sigma_low ('
-                 f'reset to {par.sigma_high})')
-        if par.zeta_1 <= 0 or par.zeta_1 >= 1 - par.sigma_low:
-            par.zeta_1 = 0.5 * (1 - par.sigma_low)
-            warn('param.zeta_1 must be strictly between 0 and 1 - '
-                 f'param.sigma_low (reset to {par.zeta_1})')
-        if par.zeta_2 <= 0 or par.zeta_2 >= 0.5:
-            par.zeta_2 = 0.1
-            warn('param.zeta_2 must be strictly between 0 and 0.5 (reset to '
-                 f'{par.zeta_2})')
+        n_iter = 0
+        max_iter = self.param.max_iter
+        self.status = SolverStatus.RUNNING
+        while (self.status.is_running and
+               (max_iter is None or n_iter < max_iter)):
+            self.step()
+            n_iter += 1
 
-        # Helper functions for error bounds.
-        if problem.objective.grad_tol_type == 'l1':
-            errbnd = self._l1errbnd
-            graderr_global = self._l1graderr_global
-            graderr_local = self._l1graderr_local
-        elif problem.objective.grad_tol_type == 'linfty':
-            errbnd = self._linferrbnd
-            graderr_global = self._linfgraderr_global
-            graderr_local = self._linfgraderr_local
-        else:
-            raise ValueError('Gradient tolerance type '
-                             f'\'{problem.objective.grad_tol_type}\' is '
-                             'unknown.')
-
-        # Initialize trust region radius if necessary.
-        if state.tr_radius is None:
-            state.tr_radius = par.tr_radius
-        if state.tr_radius <= 0.0:
-            state.tr_radius = math.inf
-        state.tr_radius = min(state.tr_radius, problem.space.measure)
-
-        # Perform initial gradient evaluation if necessary.
-        problem.objective.arg = state.x
-        problem.objective.grad_tol = errbnd(state.tr_radius)
-        state.g, state.e_g = problem.objective.get_gradient()
-        state.f, state.e_f = problem.objective.get_value()
-
-        # Calculate dual infeasibility.
-        full_step = state.g < 0.0
-        state.dual_inf = -state.g(full_step)
-        state.err_dual_inf = graderr_global(state.e_g)
-
-        # Complain if the sign of the dual infeasibility is wrong.
-        if state.dual_inf < 0:
-            raise RuntimeError('`dual_inf` may not be negative')
-
-        # Output log line.
-        self._logline(stats.n_iter, state.f, state.dual_inf)
-
-        failed_tr_count = 0
-        while (par.max_iter is None or stats.n_iter < par.max_iter):
-            # Terminate if near-stationary.
-            if state.dual_inf <= par.abstol - state.err_dual_inf:
-                break
-
-            # Find an improvement step.
-            step_finder.gradient = state.g
-            step_finder.tolerance = (
-                (par.zeta_2 * step_finder.quality * par.abstol)
-                / problem.space.measure
-                * state.tr_radius
-            )
-            step_finder.radius = state.tr_radius
-            step, _ = step_finder.get_step()
-
-            # Calculate projected objective change and error bound.
-            proj_diff = state.g(step)
-            proj_err = graderr_local(state.e_g, step)
-
-            # Calculate objective function evaluation error budget.
-            error_budget = par.sigma_low * min(
-                (abs(proj_diff) - proj_err) * par.zeta_1 - proj_err,
-                (abs(proj_diff) * par.zeta_1 - proj_err) / (1 - par.zeta_1)
-            )
-
-            # Evaluate functional at current point if necessary.
-            if state.f is None or state.e_f is None or \
-                    state.e_f > (2 / 3) * error_budget:
-                problem.objective.val_tol = (2/3) * error_budget
-                state.f, state.e_f = problem.objective.get_value()
-
-            # Evaluate functional at end point.
-            problem.objective.arg = state.x ^ step
-            problem.objective.val_tol = min((2/3) * error_budget,
-                                            cast(float, state.e_f))
-            f_end, e_f_end = problem.objective.get_value()
-
-            # Decide whether to accept or reject the step.
-            rho = (f_end - state.f) / proj_diff
-            if rho >= par.sigma_low:
-                # Update state
-                state.x, state.f, state.e_f = problem.objective.arg, f_end, \
-                    e_f_end
-
-                # Update trust region radius
-                if rho >= par.sigma_high:
-                    state.tr_radius = min(2 * state.tr_radius,
-                                          problem.space.measure)
-
-                # Evaluate gradient
-                problem.objective.grad_tol = errbnd(state.tr_radius)
-                state.g, state.e_g = problem.objective.get_gradient()
-
-                # Calculate dual infeasibility.
-                full_step = state.g < 0.0
-                state.dual_inf = -state.g(full_step)
-                state.err_dual_inf = graderr_global(state.e_g)
-
-                # Complain if the sign of the dual infeasibility is wrong.
-                if state.dual_inf < 0:
-                    raise RuntimeError('`dual_inf` may not be negative')
-
-                # Update stats.
-                stats.n_steps_accepted += 1
-                stats.n_iter += 1
-
-                # Output log line.
-                self._logline(stats.n_iter, state.f, state.dual_inf,
-                              step.measure, failed_tr_count)
-
-                # Reset failed trust-region count.
-                failed_tr_count = 0
-            else:
-                # Update trust region radius.
-                state.tr_radius /= 2
-
-                # Reset argument of objective.
-                problem.objective.arg = state.x
-
-                # Re-evaluate gradient if necessary.
-                problem.objective.grad_tol = errbnd(state.tr_radius)
-                state.g, state.e_g = problem.objective.get_gradient()
-
-                # Calculate dual infeasibility.
-                full_step = state.g < 0.0
-                state.dual_inf = -state.g(full_step)
-                state.err_dual_inf = graderr_global(state.e_g)
-
-                # Complain if the sign of the dual infeasibility is wrong.
-                if state.dual_inf < 0:
-                    raise RuntimeError('`dual_inf` may not be negative')
-
-                # Update stats.
-                stats.n_steps_rejected += 1
-
-                # Increase failed trust-region count.
-                failed_tr_count += 1
+        if self.status.is_running:
+            self.status = SolverStatus.ERROR_MAX_ITER

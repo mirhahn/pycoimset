@@ -15,3 +15,6 @@
 """
 Main loop implementations.
 """
+from .unconstrained import Solver as UnconstrainedSolver
+
+__all__ = ['UnconstrainedSolver']

@@ -2,7 +2,7 @@
 Main Lotka-Volterra fishing ODE system.
 '''
 
-from typing import Optional, cast, overload
+from typing import Optional, cast, overload, Tuple
 
 import numpy
 from numpy.typing import ArrayLike
@@ -22,6 +22,25 @@ __all__ = [
 
 
 class LotkaForwardIVP:
+    #: Second derivative with respect to state.
+    HessStateState = numpy.array([
+        [
+            [0.0,  -1.0, 0.0],
+            [-1.0,  0.0, 0.0],
+            [0.0,   0.0, 0.0]
+        ],
+        [
+            [0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+        ],
+        [
+            [2.0, 0.0, 0.0],
+            [0.0, 2.0, 0.0],
+            [0.0, 0.0, 0.0]
+        ]
+    ])
+
     #: Constants determining the impact of the fishing control on the
     #: abundances of the species in the system. Must have shape `(2,)`.
     coefficients: numpy.ndarray
@@ -32,7 +51,7 @@ class LotkaForwardIVP:
 
     #: Time range. Tuple of start and end time where start time must be
     #: strictly smaller than end time.
-    time_range: tuple[float, float]
+    time_range: Tuple[float, float]
 
     def __init__(self, coeff, initial_state, start_time, end_time):
         self.coefficients = numpy.array(coeff).flatten()
@@ -108,28 +127,10 @@ class LotkaForwardIVP:
                  `(3, 3, 3, m)`.
         :rtype: numpy.ndarray
         '''
-        yval = numpy.asarray(state)
-
-        return numpy.broadcast_to(
-            numpy.array([
-                [
-                    [0.0,  -1.0, 0.0],
-                    [-1.0,  0.0, 0.0],
-                    [0.0,   0.0, 0.0]
-                ],
-                [
-                    [0.0, 1.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0]
-                ],
-                [
-                    [2.0, 0.0, 0.0],
-                    [0.0, 2.0, 0.0],
-                    [0.0, 0.0, 0.0]
-                ]
-            ])[:, :, :, *(numpy.newaxis for _ in range(yval.ndim - 1))],
-            shape=(3, 3, 3, *yval.shape[1:])
-        )
+        shape = numpy.shape(state)
+        return numpy.broadcast_to(LotkaForwardIVP.HessStateState[
+            :, :, :, *(numpy.newaxis for _ in range(len(shape) - 1))
+        ], shape=(3, 3, 3, *shape[1:]))
 
     def deriv_ctrl(self, state):
         '''

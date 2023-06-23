@@ -2,11 +2,15 @@
 Static type checking for user-defined types.
 '''
 
+from enum import StrEnum
+from numbers import Real
 from types import NotImplementedType
-from typing import Literal, Optional, Protocol, TypeVar
+from typing import Callable, Literal, Optional, Protocol, TypeVar, overload
+import typing
 
 
 __all__ = [
+    'ErrorNorm',
     'SimilarityClass',
     'SignedMeasure',
     'SimilaritySpace',
@@ -181,6 +185,55 @@ class SimilaritySpace(Protocol[Spc]):
         ...
 
 
+class ErrorNorm(StrEnum):
+    '''
+    Enumeration of error norms for gradient error control.
+
+    Gradient error can be controlled using several norms. Depending on
+    which norm is chosen, different rules apply with regard to how
+    tolerances and error estimates are calculated. This is encapsulated
+    in this class.
+    '''
+    L1 = ('l1', lambda _, e: e, lambda _, e: e)
+    Linfty = ('linfty', lambda mu, e: mu * e, lambda mu, e: e / mu)
+
+    _err: Callable[[float, float], float]
+    _tol: Callable[[float, float], float]
+
+    def __new__(cls, value: str,
+                error: Callable[[float, float], float],
+                tolerance: Callable[[float, float], float]
+                ):
+        obj = str.__new__(cls)
+        obj._value_ = value
+        obj._err = error
+        obj._tol = tolerance
+        return obj
+
+    def estimated_error(self, measure: float, error_norm: float) -> float:
+        '''
+        Estimate errr for a similarity class of given size.
+
+        :param measure: Measure of the similarity class.
+        :type measure: float
+        :param error_norm: Value of overall error norm.
+        :type error_norm: float
+        '''
+        return self._err(measure, error_norm)
+
+    def required_tolerance(self, measure: float, error_bound: float) -> float:
+        '''
+        Estimate error tolerance required to guarantee given error.
+
+        :param measure: Measure for which the error bound should be
+                        guaranteed.
+        :type measure: float
+        :param error_bound: Desired error bound.
+        :type error_bound: float
+        '''
+        return self._tol(measure, error_bound)
+
+
 class Functional(Protocol[Spc]):
     '''
     Protocol for a set functional.
@@ -211,7 +264,7 @@ class Functional(Protocol[Spc]):
         ...
 
     @property
-    def grad_tol_type(self) -> Literal['l1', 'linfty']:
+    def grad_tol_type(self) -> ErrorNorm:
         '''Indicate type of gradient tolerance enforcement.'''
         ...
 

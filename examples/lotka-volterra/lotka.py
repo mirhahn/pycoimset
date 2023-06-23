@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from pycoimset import Problem, UnconstrainedSolver
+from pycoimset import UnconstrainedSolver
 
 import lotka_volterra.ext.scipy as scipy_ext
 from lotka_volterra.objective import LotkaObjectiveFunctional
@@ -16,8 +16,7 @@ scipy_ext.register_extensions()
 # Define optimization problem
 space = IntervalSimilaritySpace((0.0, 12.0))
 objective = LotkaObjectiveFunctional(space)
-problem = Problem(space, objective)
 
 # Set up solver.
-solver = UnconstrainedSolver(problem)
+solver = UnconstrainedSolver(objective)
 solver.solve()
