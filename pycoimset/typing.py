@@ -2,15 +2,16 @@
 Static type checking for user-defined types.
 '''
 
+import dataclasses
+
 from enum import StrEnum
-from numbers import Real
 from types import NotImplementedType
-from typing import Callable, Literal, Optional, Protocol, TypeVar, overload
-import typing
+from typing import cast, Callable, Optional, Protocol, Self, TypeVar
 
 
 __all__ = [
     'ErrorNorm',
+    'JSONSerializable',
     'SimilarityClass',
     'SignedMeasure',
     'SimilaritySpace',
@@ -19,6 +20,21 @@ __all__ = [
 
 
 Spc = TypeVar('Spc', bound='SimilaritySpace')
+
+
+class JSONSerializable(Protocol):
+    def toJSON(self) -> dict | list:
+        '''Serialize the object into a JSON-compatible object.'''
+        if dataclasses.is_dataclass(self):
+            return dataclasses.asdict(self)
+        raise NotImplementedError()
+
+    @classmethod
+    def fromJSON(cls, obj: dict | list) -> Self:
+        '''Deserialize an object from JSON data.'''
+        if isinstance(obj, list):
+            return cast(Self, cls(*obj))
+        return cast(Self, cls(**obj))
 
 
 class SimilarityClass(Protocol[Spc]):

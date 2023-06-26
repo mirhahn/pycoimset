@@ -16,20 +16,19 @@
 Implementations of the basic unconstrained optimization loop.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum
 import math
 from types import NotImplementedType
-from typing import Generic, NamedTuple, Optional, TypeVar, cast
-import typing
+from typing import Generic, NamedTuple, Optional, TypeVar
 
 import numpy
 
 from ..logging import TabularLogger
 from ..step import SteepestDescentStepFinder
 from ..typing import (
-    ErrorNorm,
     Functional,
+    JSONSerializable,
     SignedMeasure,
     SimilarityClass,
     SimilaritySpace,
@@ -44,7 +43,7 @@ T = TypeVar('T')
 
 
 @dataclass
-class SolverParameters:
+class SolverParameters(JSONSerializable):
     '''
     User specified parameters for the algorithm.
 
@@ -75,7 +74,7 @@ class SolverParameters:
     #: Error tuning parameter. Regulates the ratio between a step's
     #: projected descent and the maximum guaranteeable projected
     #: descent. Must be strictly between 0 and 1.
-    margin_step: float = 0.5
+    margin_step: float = 0.25
 
     #: Error tuning parameter. Regulates the relative error of the
     #: projected descent for the given step. Must be strictly between
@@ -85,7 +84,7 @@ class SolverParameters:
     #: Error tuning parameter. Regulates the ratio between
     #: instationarity error and absolute termination tolerance.
     #: Must be strictly between 0 and 1.
-    margin_instat: float = 0.5
+    margin_instat: float = 0.25
 
     #: Initial trust region radius. This will be clamped to be a number
     #: strictly greater than 0 and less than or equal to the maximal step
@@ -438,7 +437,7 @@ class Solver(Generic[Spc]):
         grad_tol_full = norm.required_tolerance(
             mu_full, xi_instat * max(tau - eps, eps)
         )
-        grad_tol = min(grad_tol_step, grad_tol_full)
+        grad_tol = min(grad_tol_step, grad_tol_full) / 2
 
         # Calculate objective error tolerance.
         sigma_0 = self.param.thres_accept
@@ -520,6 +519,10 @@ class Solver(Generic[Spc]):
                 / proj_chg)
             step_quality_err = ((self.solution.val.error + new_sol.val.error)
                 / abs(proj_chg))
+
+            # Update curvature estimate.
+            self._update_curvature(step.measure, proj_chg,
+                                   new_sol.val.value - self.solution.val.value)
 
             # Assess whether or not to accept.
             if step_quality - step_quality_err >= self.param.thres_accept:

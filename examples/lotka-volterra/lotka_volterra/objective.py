@@ -230,6 +230,14 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
         return ErrorNorm.Linfty
 
     @property
+    def ivp_objects(self) -> LotkaObjects:
+        return self._ivp
+
+    @property
+    def trajectories(self) -> Trajectories:
+        return self._traj
+
+    @property
     def _inttol(self) -> tuple[float, float]:
         '''Integration tolerances for IVP solvers.'''
         if self._abstol is None or self._reltol is None:

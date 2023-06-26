@@ -35,7 +35,7 @@ class TabularLogger:
                  width: Optional[Mapping[str, int]] = None,
                  file: Optional[IO[str]] = None,
                  flush: bool = False,
-                 interval: int = 40):
+                 interval: int = 50):
         if label is None:
             label = {}
         if format is None:

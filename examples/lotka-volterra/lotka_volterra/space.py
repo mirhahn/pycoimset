@@ -3,7 +3,6 @@ Implementation of a similarity class.
 '''
 
 import copy
-from functools import cached_property
 from types import NotImplementedType
 from typing import Callable, Optional, Self, assert_type, cast, overload
 
@@ -11,7 +10,7 @@ import numpy
 from numpy.typing import ArrayLike
 import sortednp
 
-from pycoimset.typing import SignedMeasure, SimilarityClass, SimilaritySpace
+from pycoimset.typing import SignedMeasure, SimilarityClass, SimilaritySpace, JSONSerializable
 
 from .polyfit import PolynomialTrajectory
 
@@ -117,7 +116,8 @@ def join_polynomial_splines(ta: ArrayLike, pa: ArrayLike, tb: ArrayLike,
     return t, pa_out, pb_out
 
 
-class IntervalSimilaritySpace(SimilaritySpace['IntervalSimilaritySpace']):
+class IntervalSimilaritySpace(SimilaritySpace['IntervalSimilaritySpace'],
+                              JSONSerializable):
     time_range: tuple[float, float]
 
     def __init__(self, time_range: tuple[float, float]):
@@ -129,6 +129,22 @@ class IntervalSimilaritySpace(SimilaritySpace['IntervalSimilaritySpace']):
     def __repr__(self) -> str:
         '''Generate string representation.'''
         return f'IntervalSimilaritySpace({repr(self.time_range)})'
+
+    def toJSON(self) -> dict:
+        '''
+        Convert to JSON-compatible data type.
+        '''
+        start, end = self.time_range
+        return { 'start': start, 'end': end }
+
+    @classmethod
+    def fromJSON(cls, obj: dict | list) -> 'IntervalSimilaritySpace':
+        '''Create new space from JSON description.'''
+        if not isinstance(obj, dict):
+            raise TypeError('Input must be JSON dictionary.')
+        start = obj['start']
+        end = obj['end']
+        return IntervalSimilaritySpace((float(start), float(end)))
 
     @property
     def measure(self) -> float:
@@ -147,7 +163,8 @@ class IntervalSimilaritySpace(SimilaritySpace['IntervalSimilaritySpace']):
         return IntervalSimilarityClass(self, self.time_range)
 
 
-class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace]):
+class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace],
+                              JSONSerializable):
     #: Underlying similarity space.
     _space: IntervalSimilaritySpace
 
@@ -220,6 +237,25 @@ class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace]):
         '''Generate string representation.'''
         return (f'IntervalSimilarityClass({repr(self._space)}, '
                 f'{repr(self.switch_times)})')
+
+    def toJSON(self, with_space: bool = True) -> dict:
+        '''Export to JSON.'''
+        if with_space:
+            return {'space': self.space.toJSON(),
+                    'times': self.switch_times.tolist()}
+        return {'times': self.switch_times.tolist()}
+
+    @classmethod
+    def fromJSON(cls, obj: list | dict,
+                 space: Optional[IntervalSimilaritySpace] = None
+                 ) -> 'IntervalSimilarityClass':
+        '''Import from JSON.'''
+        if not isinstance(obj, dict):
+            raise TypeError('JSON description is not a dictionary.')
+        if space is None:
+            space = IntervalSimilaritySpace.fromJSON(obj['space'])
+        switch_times = numpy.asarray(obj['times'])
+        return IntervalSimilarityClass(space, switch_times)
 
     @property
     def space(self) -> IntervalSimilaritySpace:
