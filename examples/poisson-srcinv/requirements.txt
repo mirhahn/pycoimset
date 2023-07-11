@@ -1,0 +1,5 @@
+numpy
+matplotlib
+pycoimset
+scipy
+scikit-fem[all]
