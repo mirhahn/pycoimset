@@ -17,10 +17,10 @@ from pde import PoissonEvaluator
 resource.setrlimit(resource.RLIMIT_DATA, (2 * 2**30, 3 * 2**30))
 warnings.filterwarnings('error')
 
-mesh = skfem.MeshTri().refined(3)
+mesh = skfem.MeshTri().refined(4)
 basis_ctrl = skfem.Basis(mesh, skfem.ElementTriP0())
 k = cast(numpy.ndarray, basis_ctrl.project(lambda x: numpy.where(x[0] + x[1] >= 1, 1.0, 0.0)))
-eval = PoissonEvaluator(mesh, k)
+eval = PoissonEvaluator(mesh, k, 1e-7, 1e-5)
 eval.eval_obj()
 eval.eval_grad()
 

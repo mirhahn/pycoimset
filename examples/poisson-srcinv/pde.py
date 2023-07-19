@@ -521,12 +521,13 @@ class PoissonEvaluator:
         return eta_int - eta_bnd
 
 
-    @depends_on(pdesol, qpdesol, adjsol, qadjsol)
+    @depends_on(mesh, pdesol, qpdesol, adjsol, qadjsol)
     @cached_property
     def graderr(self) -> numpy.ndarray:
         '''Gradient L^1 error estimator.'''
         # Retrieve spaces and mesh.
         s = self.spaces
+        m = self.mesh
 
         # Assemble interior residual terms.
         @skfem.Functional
@@ -535,8 +536,7 @@ class PoissonEvaluator:
             gy, gyh, gz, gzh = (
                 cast(numpy.ndarray, grad(f)) for f in (y, yh, z, zh)
             )
-            return dkdw(w.p) * (dot(gy - gyh, gzh) + dot(gyh, gz - gzh)
-                                + dot(gy - gyh, gz - gzh))
+            return dkdw(dot(gy - gyh, gz - gzh))
         eta_int = interior_residual.elemental(
             s.p2,
             y=s.p2.interpolate(self.qpdesol),
@@ -545,7 +545,41 @@ class PoissonEvaluator:
             zh=s.p2.with_element(s.p1.elem()).interpolate(self.adjsol),
             p=s.p2.with_element(s.p0.elem()).interpolate(self._forms.get_k())
         )
-        return numpy.abs(eta_int)
+
+        # Create buffer for facet terms.
+        fac_buf = numpy.zeros((2, m.nfacets))
+
+        # Assemble facet terms.
+        p2s = [skfem.InteriorFacetBasis(m, s.p2.elem(), side=0),
+               skfem.InteriorFacetBasis(m, s.p2.elem(), side=1),
+               skfem.FacetBasis(m, s.p2.elem(), side=0, facets=['right', 'bottom'])]
+        p1s = [skfem.InteriorFacetBasis(m, s.p1.elem(), side=0, quadrature=p2s[0].quadrature),
+               skfem.InteriorFacetBasis(m, s.p1.elem(), side=1, quadrature=p2s[1].quadrature),
+               skfem.FacetBasis(m, s.p1.elem(), side=0, facets=['right', 'bottom'], quadrature=p2s[2].quadrature)]
+        sides = [0, 1, 0]
+
+        @skfem.Functional
+        def facet_residual(w):
+            idx, n, y, z, zh = w.idx, w.n, w.y, w.z, w.zh
+            gy = cast(numpy.ndarray, grad(y))
+            return (-1)**idx * dkdw(dot(gy, n) * (z - zh))
+        for p2, p1, side in zip(p2s, p1s, sides):
+            fac_buf[side, p2.find] = facet_residual.elemental(
+                p2,
+                idx=side,
+                y=p1.interpolate(self.adjsol),
+                z=p2.interpolate(self.qpdesol),
+                zh=p1.interpolate(self.pdesol)
+            ) + facet_residual.elemental(
+                p2,
+                idx=side,
+                y=p1.interpolate(self.pdesol),
+                z=p2.interpolate(self.qadjsol),
+                zh=p1.interpolate(self.adjsol)
+            )
+
+        numpy.add.at(eta_int, m.f2t, fac_buf)
+        return eta_int
 
     def eval_obj(self) -> float:
         '''
@@ -572,7 +606,7 @@ class PoissonEvaluator:
         Evaluate objective to given tolerance.
         '''
         while (err := abs(numpy.sum((eta := self.graderr)))) > self._tol.grad:
-            eta = numpy.abs(eta) * self.mesh.param()**2
+            eta = numpy.abs(eta) * self.vol
             sort_idx = numpy.argsort(eta)
             cum_err = numpy.cumsum(eta[sort_idx])
             split_idx = numpy.searchsorted(cum_err, 0.9 * cum_err[-1])
