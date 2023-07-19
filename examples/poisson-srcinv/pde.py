@@ -22,204 +22,109 @@ as described in
 
 from dataclasses import dataclass, field
 from functools import cached_property
+import math
 import time
 from typing import NamedTuple, Optional, cast
 
 import numpy
 import scipy.sparse
+import scipy.sparse.linalg
 import skfem
 from skfem.helpers import dot, grad
 
-
-def poisson_lhs(y, v, k):
-    '''
-    Left hand side of the Poisson equation.
-
-    Parameters
-    ----------
-    y
-        Trial/Solution function.
-    v
-        Test function.
-    k
-        Diffusivity coefficient.
-
-    Remarks
-    -------
-    This form is linear in `y` and `v` and can therefore also be used
-    to generate adjoints and derivatives. It is affine in `k`.
-    '''
-    # Interpolate control function.
-    return dot((0.999 * k + 0.001) * grad(y), grad(v))
+from util import notify_property_update, tracks_dependencies, depends_on
 
 
-def poisson_lhs_deriv_diffusivity(y, v, dk):
-    '''Derivative of `poisson_rhs` with respect to `k`.'''
-    return dot(0.999 * dk * grad(y), grad(v))
+def k(w):
+    return 0.01 + 0.99 * w
 
 
-poisson_lhs_deriv_trial = poisson_lhs
+def dkdw(d):
+    return 0.99 * d
 
 
-poisson_lhs_deriv_test = poisson_lhs
+def poisson_system(spc_sol: skfem.Basis, spc_ctrl: skfem.Basis,
+                   ctrl: numpy.ndarray, src_dens: float, adjoint: bool = False
+                   ) -> skfem.CondensedSystem:
+    # Get mesh.
+    mesh = spc_sol.mesh
+    assert spc_ctrl.mesh is mesh
 
+    # Define the remap function.
+    if adjoint:
+        remap = lambda u, v: (v, u)
+    else:
+        remap = lambda u, v: (u, v)
 
-def poisson_rhs(v, f):
-    '''
-    Right hand side of the Poisson equation.
-
-    Parameters
-    ----------
-    v
-        Test function.
-    f
-        Source density.
-    '''
-    return f * v
-
-
-def objective(y, f):
-    '''
-    Objective functional.
-
-    Parameters
-    ----------
-    y
-        Poisson equation solution.
-    f
-        Source density.
-    '''
-    return y * f
-
-
-objective_deriv_solution = objective
-
-
-class PoissonFormsTuple(NamedTuple):
-    '''Integral forms for the problem.'''
-    primal_bilin: skfem.BilinearForm
-    primal_lin: skfem.LinearForm
-    obj: skfem.Functional
-    obj_grad: skfem.LinearForm
-    adjoint_bilin_grad2test: skfem.BilinearForm
-    adjoint_bilin_test2ctrl: skfem.BilinearForm
-
-
-PoissonForms = PoissonFormsTuple(
-    primal_bilin=skfem.BilinearForm(
-        lambda u, v, w: poisson_lhs(u, v, w.k)
-    ),
-    primal_lin=skfem.LinearForm(lambda v, w: poisson_rhs(v, w.f)),
-    obj=skfem.Functional(lambda w: objective(w.y, w.f)),
-    obj_grad=skfem.LinearForm(lambda v, w: objective(v, w.f)),
-    adjoint_bilin_grad2test=skfem.BilinearForm(
-        lambda u, v, w: poisson_lhs_deriv_trial(v, u, w.k)
-    ),
-    adjoint_bilin_test2ctrl=skfem.BilinearForm(
-        lambda u, v, w: poisson_lhs_deriv_diffusivity(w.y, u, v)
+    # Assemble cell integral.
+    @skfem.BilinearForm
+    def bilinear_interior_form(u, v, w):
+        u, v = remap(u, v)
+        gu = cast(numpy.ndarray, grad(u))
+        gv = cast(numpy.ndarray, grad(v))
+        return dot(k(w.p) * gu, gv)
+    a_mat = bilinear_interior_form.assemble(
+        spc_sol, p=spc_sol.with_element(spc_ctrl.elem()).interpolate(ctrl)
     )
-)
+
+    # Assemble weight vector.
+    @skfem.LinearForm
+    def linear_form(v, w):
+        return w.f * v
+    b_vec = linear_form.assemble(spc_sol, f=src_dens)
+
+    # Condense system.
+    return skfem.condense(a_mat, b_vec, D=spc_sol.get_dofs(['top', 'left']))
 
 
-@dataclass
+def poisson_control_deriv(spc_sol: skfem.Basis, spc_ctrl: skfem.Basis,
+                          ctrl: numpy.ndarray, pde_sol: numpy.ndarray
+                          ) -> scipy.sparse.spmatrix:
+    # Get mesh.
+    mesh = spc_sol.mesh
+    assert spc_ctrl.mesh is mesh
+
+    # Assemble cell integral.
+    @skfem.BilinearForm
+    def interior_form(u, v, w):
+        return dot(dkdw(v) * grad(w.y), grad(u))    # pyright: ignore
+    a_mat = interior_form.assemble(
+        spc_sol, spc_ctrl, y=spc_sol.interpolate(pde_sol)
+    )
+
+    return a_mat
+
+
 class FunctionSpaces:
-    #: Control function space.
-    ctrl: skfem.Basis
+    p0: skfem.Basis
+    p1: skfem.Basis
+    p2: skfem.Basis
 
-    #: PDE solution space.
-    pde_sol: skfem.Basis
-
-    #: Quadrature space. This is a parent space which is suitable to
-    #: exactly represent all composite functions used in forms.
-    quad: skfem.Basis
-
-    @classmethod
-    def from_mesh(cls, mesh: skfem.Mesh) -> 'FunctionSpaces':
-        '''
-        Create default function spaces for a given mesh.
-
-        Parameters
-        ----------
-        mesh : skfem.Mesh
-            Underlying mesh.
-
-        Remarks
-        -------
-        At the moment, this method is only implemented for triangular
-        meshes and will raise `NotImplementedError` for all others.
-        '''
-        if not isinstance(mesh, skfem.MeshTri):
-            raise NotImplementedError()
-        return FunctionSpaces(
-            ctrl=skfem.Basis(mesh, skfem.ElementTriP0()),
-            pde_sol=skfem.Basis(mesh, skfem.ElementTriP1()),
-            quad=skfem.Basis(mesh, skfem.ElementTriP2())
-        )
-
-    def make_quadrature_spaces(self, quad: Optional[skfem.Basis] = None
-                               ) -> 'FunctionSpaces':
-        '''
-        Create corresponding quadrature spaces.
-
-        This will generate a set of similar spaces with the same
-        elements but with the quadrature points of the quadrature
-        space. This is useful for form assembly because it guarantees
-        that the integral forms are assembled exactly rather than using
-        lower-order approximations.
-
-        Parameters
-        ----------
-        quad : skfem.Basis, optional
-            New quadrature space.
-        '''
-        if quad is None:
-            quad = self.quad
-        else:
-            assert quad.mesh is self.quad.mesh
-        return FunctionSpaces(
-            ctrl=self.quad.with_element(self.ctrl.elem()),
-            pde_sol=self.quad.with_element(self.pde_sol.elem()),
-            quad=quad
-        )
+    def __init__(self, mesh: skfem.MeshTri):
+        self.p0 = skfem.Basis(mesh, skfem.ElementTriP0())
+        self.p1 = skfem.Basis(mesh, skfem.ElementTriP1())
+        self.p2 = skfem.Basis(mesh, skfem.ElementTriP2())
 
 
+@tracks_dependencies
 class AssembledForms:
     _spc: FunctionSpaces
-    _qspc: FunctionSpaces
 
     _k: Optional[numpy.ndarray]
     _f: Optional[float]
     _y: Optional[numpy.ndarray]
 
-    def __init__(self, spaces: FunctionSpaces,
-                 quad_spc: Optional[skfem.Basis] = None):
-        assert spaces.ctrl.mesh is spaces.pde_sol.mesh
-        assert spaces.ctrl.mesh is spaces.quad.mesh
-
+    def __init__(self, spaces: FunctionSpaces):
         self._spc = spaces
-        self._qspc = spaces.make_quadrature_spaces(quad_spc)
 
         self._k = None
         self._f = None
         self._y = None
 
-    def _reset(self, *attrs: str) -> None:
-        '''Reset properties by name.'''
-        for attr in attrs:
-            try:
-                delattr(self, attr)
-            except AttributeError:
-                pass
-
     @property
     def spaces(self) -> FunctionSpaces:
         '''Basic function spaces.'''
         return self._spc
-
-    @property
-    def qspaces(self) -> FunctionSpaces:
-        '''Higher-order function spaces.'''
-        return self._qspc
 
     @property
     def k(self) -> Optional[numpy.ndarray]:
@@ -229,9 +134,7 @@ class AssembledForms:
     @k.setter
     def k(self, val: Optional[numpy.ndarray]):
         self._k = val
-        self._reset('forward_system',
-                    'adjoint_system',
-                    'quad_adjoint_system')
+        notify_property_update(self, 'k')
 
     def get_k(self) -> numpy.ndarray:
         '''Get diffusivity parameter or throw exception.'''
@@ -246,12 +149,7 @@ class AssembledForms:
     @f.setter
     def f(self, val: Optional[float]):
         self._f = val
-        self._reset('forward_system',
-                    'objective_value',
-                    'gradient_vector',
-                    'quad_gradient_vector',
-                    'adjoint_system',
-                    'quad_adjoint_system')
+        notify_property_update(self, 'f')
 
     def get_f(self) -> float:
         '''Get source density parameter or raise exception.'''
@@ -266,81 +164,60 @@ class AssembledForms:
     @y.setter
     def y(self, val: Optional[numpy.ndarray]):
         self._y = val
-        self._reset('objective_value',
-                    'adjoint_system',
-                    'quad_adjoint_system',
-                    'gradient_matrix')
+        notify_property_update(self, 'y')
 
     def get_y(self) -> numpy.ndarray:
         '''Get current solution or raise exception.'''
         assert self._y is not None
         return self._y
 
+    @depends_on(k, f)
     @cached_property
-    def forward_system(self) -> skfem.CondensedSystem:
+    def fwdsys(self) -> skfem.CondensedSystem:
         '''Assembled Poisson system.'''
-        # Get bases.
-        basis_ctrl = self._spc.ctrl
-        basis_sol = self._spc.pde_sol
+        s = self._spc
+        return poisson_system(s.p1, s.p0, self.get_k(), self.get_f())
 
-        # Assemble stiffness matrix and weight vector.
-        a_mat = PoissonForms.primal_bilin.assemble(basis_sol, k=basis_ctrl.interpolate(self.get_k()))
-        b_vec = PoissonForms.primal_lin.assemble(basis_sol, f=self.get_f())
-
-        # Condense system.
-        return skfem.condense(a_mat, b_vec, D=basis_sol.get_dofs(['left', 'top']))
-
+    @depends_on(k, f)
     @cached_property
-    def objective_value(self) -> float:
+    def fwdsys_high(self) -> skfem.CondensedSystem:
+        '''Assembled Poisson system.'''
+        s = self._spc
+        return poisson_system(s.p2, s.p0, self.get_k(), self.get_f())
+
+    @depends_on(y, f)
+    @cached_property
+    def objval(self) -> float:
         '''Objective function value.'''
-        basis_sol = self._spc.pde_sol
-        return PoissonForms.obj.assemble(
-            basis_sol,
-            f=self.get_f(),
-            y=basis_sol.interpolate(self.get_y())
-        )
+        @skfem.Functional
+        def objective(w):
+            return w.f * w.y
+        s = self._spc
+        return objective.assemble(s.p1, f=self.get_f(),
+                                  y=s.p1.interpolate(self.get_y()))
 
+    @depends_on(k, f)
     @cached_property
-    def gradient_vector(self) -> numpy.ndarray:
-        '''Assembled gradient vector.'''
-        return PoissonForms.obj_grad.assemble(self._spc.pde_sol, f=self.get_f())
-
-    @cached_property
-    def quad_gradient_vector(self) -> numpy.ndarray:
-        '''Assembled higher-order gradient vector.'''
-        return PoissonForms.obj_grad.assemble(self._spc.quad, f=self.get_f())
-
-    @cached_property
-    def adjoint_system(self) -> skfem.CondensedSystem:
+    def adjsys(self) -> skfem.CondensedSystem:
         '''Assembled adjoint system.'''
-        a_mat = PoissonForms.adjoint_bilin_grad2test.assemble(
-            self._qspc.pde_sol, self._qspc.pde_sol,
-            k=self._qspc.ctrl.interpolate(self.get_k())
-        )
-        b_vec = self.gradient_vector
-        return skfem.condense(
-            a_mat, b_vec, D=self._qspc.pde_sol.get_dofs(['left', 'top'])
-        )
+        s = self._spc
+        return poisson_system(s.p1, s.p0, self.get_k(), self.get_f(),
+                              adjoint=True)
 
+    @depends_on(k, f)
     @cached_property
-    def quad_adjoint_system(self) -> skfem.CondensedSystem:
+    def adjsys_high(self) -> skfem.CondensedSystem:
         '''Assembled higher-order adjoint system.'''
-        a_mat = PoissonForms.adjoint_bilin_grad2test.assemble(
-            self._spc.quad, self._spc.quad,
-            k=self._qspc.ctrl.interpolate(self.get_k())
-        )
-        b_vec = self.quad_gradient_vector
-        return skfem.condense(
-            a_mat, b_vec, D=self._spc.quad.get_dofs(['left', 'top'])
-        )
+        s = self._spc
+        return poisson_system(s.p2, s.p0, self.get_k(), self.get_f(),
+                              adjoint=True)
 
+    @depends_on(y)
     @cached_property
-    def gradient_matrix(self) -> scipy.sparse.spmatrix:
-        '''Assembled adjoint-to-gradient mapping.'''
-        return PoissonForms.adjoint_bilin_test2ctrl.assemble(
-            self._qspc.pde_sol, self._qspc.ctrl,
-            y=self._qspc.pde_sol.interpolate(self.get_y())
-        )
+    def gradadj2ctrl(self) -> scipy.sparse.spmatrix:
+        '''Assembled adjoint-to-control gradient mapping.'''
+        s = self._spc
+        return poisson_control_deriv(s.p1, s.p0, self.get_k(), self.get_y())
 
 
 @dataclass
@@ -357,6 +234,7 @@ class EvaluationStatistic:
         return self.time / self.num
 
 
+@tracks_dependencies
 class PoissonEvaluator:
     '''
     Objective functional for the Poisson topology design.
@@ -369,6 +247,11 @@ class PoissonEvaluator:
     class Statistics:
         #: PDE solve statistic.
         pdesol: EvaluationStatistic = field(
+            default_factory=EvaluationStatistic
+        )
+
+        #: PDE solve statistic.
+        qpdesol: EvaluationStatistic = field(
             default_factory=EvaluationStatistic
         )
 
@@ -393,48 +276,31 @@ class PoissonEvaluator:
     _tol: Tolerances
     _stats: Statistics
 
-    def __init__(self, basis: skfem.Basis, dof: numpy.ndarray,
-                 obj_tol: float = 1e-5, grad_tol: float = 1e-5):
+    def __init__(self, mesh: skfem.Mesh, ctrl_dof: numpy.ndarray,
+                 obj_tol: float = 1e-6, grad_tol: float = 1e-6):
         '''
         Constructor.
 
         Parameters
         ----------
-        basis : skfem.Basis
-            Basis of the control space.
-        dof : numpy.ndarray
-            Control function DOF vector.
+        mesh : skfem.Mesh
+            Control mesh.
+        ctrl_dof : numpy.ndarray
+            Control function DOF vector. Must be P0 on control mesh.
         obj_tol : float, optional
-            Tolerance for objective evaluation. Defaults to `1e-5`.
+            Tolerance for objective evaluation. Defaults to `1e-6`.
         grad_tol : float, optional
-            Tolerance for gradient evaluation. Defaults to `1e-5`.
+            Tolerance for gradient evaluation. Defaults to `1e-6`.
         '''
-        assert isinstance(basis.mesh, skfem.MeshTri)
+        assert isinstance(mesh, skfem.MeshTri)
 
-        self._mesh = basis.mesh
-        bctrl = basis
-        bsol = skfem.Basis(self._mesh, skfem.ElementTriP1())
-        bquad = skfem.Basis(self._mesh, skfem.ElementTriP2())
-        spc = FunctionSpaces(
-            pde_sol=bsol,
-            ctrl=bctrl,
-            quad=bquad
-        )
+        self._mesh = mesh
+        spc = FunctionSpaces(self._mesh)
         self._forms = AssembledForms(spc)
-        self._forms.k = dof
+        self._forms.k = ctrl_dof
         self._forms.f = 1e-2
         self._tol = PoissonEvaluator.Tolerances(obj_tol, grad_tol)
         self._stats = PoissonEvaluator.Statistics()
-
-    def _propreset(self, *names: str):
-        '''Reset named properties by deleting them.'''
-        if len(names) == 0:
-            names = [key for key, value in type(self).__dict__.items() if isinstance(value, cached_property)]
-        for name in names:
-            try:
-                delattr(self, name)
-            except AttributeError:
-                pass
 
     @property
     def stats(self) -> 'PoissonEvaluator.Statistics':
@@ -447,34 +313,46 @@ class PoissonEvaluator:
         return self._mesh
 
     @mesh.setter
-    def mesh(self, mesh: skfem.Mesh) -> None:
+    def mesh(self, mesh: skfem.MeshTri) -> None:
         # Mark relevant boundaries.
         mesh = mesh.with_boundaries({
             'left': lambda x: numpy.isclose(x[0], 0.0),
-            'top': lambda x: numpy.isclose(x[1], 1.0)
+            'top': lambda x: numpy.isclose(x[1], 1.0),
+            'right': lambda x: numpy.isclose(x[0], 1.0),
+            'bottom': lambda x: numpy.isclose(x[1], 0.0)
         })
 
         # Create a new forms object.
         old_forms = self._forms
-        spaces = FunctionSpaces(
-            pde_sol=skfem.Basis(mesh, old_forms.spaces.pde_sol.elem()),
-            ctrl=skfem.Basis(mesh, old_forms.spaces.ctrl.elem()),
-            quad=skfem.Basis(mesh, old_forms.spaces.quad.elem())
-        )
+        spaces = FunctionSpaces(mesh)
         self._forms = AssembledForms(spaces)
         self._forms.f = old_forms.f
 
-        k_interp = old_forms.spaces.ctrl.interpolator(old_forms.k)(spaces.ctrl.global_coordinates())
-        self._forms.k = spaces.ctrl.project(k_interp)
+        if old_forms.k is not None:
+            # Batched projection procedure for P0
+            x_center = mesh.mapping().F(numpy.array([[1/3], [1/3]])).squeeze(-1)
+            finder = self._mesh.element_finder()
+            idx_old = numpy.concatenate([finder(*x) for x in numpy.array_split(x_center, math.ceil(x_center.shape[1] / 100), axis=1)])
+            self._forms.k = old_forms.k[idx_old]
+        del old_forms
 
         # Replace old mesh.
         self._mesh = mesh
 
         # Reset everything.
-        self._propreset()
+        notify_property_update(self, 'mesh')
+
+    @depends_on(mesh)
+    @cached_property
+    def vol(self) -> numpy.ndarray:
+        '''Cell volumes.'''
+        @skfem.Functional
+        def vol(_):
+            return 1.0
+        return vol.elemental(self.spaces.p0)
 
     @property
-    def space(self) -> FunctionSpaces:
+    def spaces(self) -> FunctionSpaces:
         '''Function spaces.'''
         return self._forms.spaces
 
@@ -488,122 +366,76 @@ class PoissonEvaluator:
         '''Evaluation tolerances.'''
         return self._tol
 
+    @depends_on(mesh)
     @cached_property
     def pdesol(self) -> numpy.ndarray:
         '''DOF vector of the PDE solution.'''
-        if self._forms.k is not self.ctrl:
-            self._forms.k = self.ctrl
         time_start = time.perf_counter()
         result = cast(
             numpy.ndarray,
-            skfem.solve(*self._forms.forward_system)   # pyright: ignore
+            skfem.solve(*self._forms.fwdsys)    # pyright: ignore
         )
         time_end = time.perf_counter()
         self._stats.pdesol.time += time_end - time_start
         self._stats.pdesol.num += 1
         return result
 
+    @depends_on(mesh)
+    @cached_property
+    def qpdesol(self) -> numpy.ndarray:
+        '''DOF vector of the PDE solution.'''
+        time_start = time.perf_counter()
+        result = cast(
+            numpy.ndarray,
+            skfem.solve(*self._forms.fwdsys_high)    # pyright: ignore
+        )
+        time_end = time.perf_counter()
+        self._stats.qpdesol.time += time_end - time_start
+        self._stats.qpdesol.num += 1
+        return result
+
+    @depends_on(pdesol)
     @cached_property
     def obj(self) -> float:
         '''Objective function value.'''
         if self._forms.y is not self.pdesol:
             self._forms.y = self.pdesol
         time_start = time.perf_counter()
-        result = self._forms.objective_value
+        result = self._forms.objval
         time_end = time.perf_counter()
         self._stats.obj.time += time_end - time_start
         self._stats.obj.num += 1
         return result
 
+    @depends_on(mesh)
     @cached_property
     def adjsol(self) -> numpy.ndarray:
         '''Adjoint solution DOF vector.'''
-        if self._forms.k is not self.ctrl:
-            self._forms.k = self.ctrl
-        if self._forms.y is not self.pdesol:
-            self._forms.y = self.pdesol
         time_start = time.perf_counter()
-        result = -cast(
+        result = cast(
             numpy.ndarray,
-            skfem.solve(*self._forms.adjoint_system)    # pyright: ignore
+            skfem.solve(*self._forms.adjsys)    # pyright: ignore
         )
         time_end = time.perf_counter()
         self._stats.adjsol.time += time_end - time_start
         self._stats.adjsol.num += 1
         return result
 
+    @depends_on(mesh)
     @cached_property
     def qadjsol(self) -> numpy.ndarray:
         '''Higher-order adjoint solution DOF vector.'''
-        if self._forms.k is not self.ctrl:
-            self._forms.k = self.ctrl
         time_start = time.perf_counter()
-        result = -cast(
+        result = cast(
             numpy.ndarray,
-            skfem.solve(*self._forms.quad_adjoint_system)   # pyright: ignore
+            skfem.solve(*self._forms.adjsys_high)   # pyright: ignore
         )
         time_end = time.perf_counter()
         self._stats.qadjsol.time += time_end - time_start
         self._stats.qadjsol.num += 1
         return result
 
-    @cached_property
-    def objerr(self) -> numpy.ndarray:
-        '''Cellwise representation of objective error.'''
-        # Retrieve quadrature bases.
-        quad_p0 = self._forms.spaces.ctrl
-        quad_p1 = self._forms.spaces.pde_sol
-        quad_p2 = self._forms.spaces.quad
-
-        quad_bnd_p1 = [
-            skfem.InteriorFacetBasis(quad_p1.mesh, quad_p1.elem(), side=i)
-            for i in range(2)
-        ]
-        quad_bnd_p2 = skfem.InteriorFacetBasis(quad_p2.mesh, quad_p2.elem(),
-                                               side=0)
-
-        elem_p1 = self._forms.spaces.pde_sol.elem()
-        elem_p2 = quad_p2.elem()
-
-        # Interior residual.
-        @skfem.Functional
-        def interior_residual(w):
-            return w.f * (w.z - w.phi)
-        eta_int = interior_residual.elemental(
-            self._forms.spaces.quad,
-            f=self._forms.f,
-            z=self.qadjsol,
-            phi=self._forms.qspaces.pde_sol.interpolate(self.adjsol)
-        )
-
-        # Edge jump terms.
-        @skfem.Functional
-        def edge_residual(w):
-            h = w.h
-            n = w.n
-            dw1 = grad(w.u1)
-            dw2 = grad(w.u2)
-            return (1/2) * dot(n, dw1 - dw2) * (w.z - w.phi)
-        eta_bnd = numpy.sqrt(
-            edge_residual.elemental(
-                quad_bnd_p2,
-                u1=quad_bnd_p2.with_element(quad_bnd_p1[0].elem()
-                                            ).interpolate(self.pdesol),
-                u2=quad_bnd_p2.with_element(quad_bnd_p1[1].elem()
-                                            ).interpolate(self.pdesol),
-                z=quad_bnd_p2.interpolate(self.qadjsol),
-                phi=quad_bnd_p2.with_element(quad_bnd_p1[0].elem()
-                                             ).interpolate(self.adjsol)
-            )
-        )
-
-        # Map per-facet quantities to their incident cells.
-        tmp = numpy.zeros(self._mesh.nfacets)
-        tmp[quad_bnd_p2.find] = eta_bnd
-        eta_bnd = numpy.sum(tmp[self._mesh.t2f], axis=0)
-
-        return numpy.abs(eta_int) + numpy.abs(eta_bnd)
-
+    @depends_on(adjsol, vol)
     @cached_property
     def grad(self) -> numpy.ndarray:
         '''Gradient DOF vector.'''
@@ -611,25 +443,146 @@ class PoissonEvaluator:
             self._forms.y = self.pdesol
         adj_sol = self.adjsol
         time_start = time.perf_counter()
-        result = self._forms.gradient_matrix.dot(adj_sol)
+        result = -self._forms.gradadj2ctrl.dot(adj_sol)
         time_end = time.perf_counter()
         self._stats.grad.time += time_end - time_start
         self._stats.grad.num += 1
         return result
 
+    @depends_on(mesh, qadjsol, pdesol)
+    @cached_property
+    def objerr(self) -> numpy.ndarray:
+        '''Cellwise representation of objective error.'''
+        # Ensure that solution information is present.
+        if self._forms.y is None:
+            self._forms.y = self.pdesol
+
+        # Retrieve quadrature bases.
+        s = self._forms.spaces
+        m = self._mesh
+
+        # Project higher-order adjoint solution onto P1.
+        f = self._forms.f
+        z = self.qadjsol
+        zh = cast(numpy.ndarray, s.p1.project(s.p1.with_element(s.p2.elem()).interpolate(z)))
+
+        # Interior residual.
+        @skfem.Functional
+        def interior_residual(w):
+            return w.f * (w.z - w.zh)
+        eta_int = interior_residual.elemental(
+            s.p2, f=f, z=z,
+            zh=s.p2.with_element(s.p1.elem()).interpolate(zh)
+        )
+
+        # Set up buffer for facet terms.
+        eta_fac = numpy.zeros(m.nfacets)
+
+        # Create facet bases.
+        p2_int = [skfem.InteriorFacetBasis(self.mesh, s.p2.elem(), side=i) for i in range(2)]
+        p1_int = [skfem.InteriorFacetBasis(self.mesh, s.p1.elem(), side=i, quadrature=q.quadrature) for i, q in enumerate(p2_int)]
+        p0_int = [skfem.InteriorFacetBasis(self.mesh, s.p0.elem(), side=i, quadrature=q.quadrature) for i, q in enumerate(p2_int)]
+        p2_bnd = skfem.FacetBasis(self.mesh, s.p2.elem(), side=0, facets=['right', 'bottom'])
+        p1_bnd = skfem.FacetBasis(self.mesh, s.p1.elem(), side=0, facets=['right', 'bottom'], quadrature=p2_bnd.quadrature)
+        p0_bnd = skfem.FacetBasis(self.mesh, s.p0.elem(), side=0, facets=['right', 'bottom'], quadrature=p2_bnd.quadrature)
+
+        # Assemble Neumann facet terms.
+        @skfem.Functional
+        def neumann_facet_residual(w):
+            n, p, y, z, zh = w.n, w.p, w.y, w.z, w.zh
+            gy = cast(numpy.ndarray, grad(y))
+            return dot(k(p) * gy, n) * (z - zh)
+        eta_fac[p2_bnd.find] = neumann_facet_residual.elemental(
+            p2_bnd,
+            p=p0_bnd.interpolate(self._forms.get_k()),
+            y=p1_bnd.interpolate(self._forms.get_y()),
+            z=p2_bnd.interpolate(z),
+            zh=p1_bnd.interpolate(zh)
+        )
+
+        # Assemble interior facet terms.
+        @skfem.Functional
+        def interior_facet_residual(w):
+            n, p, y, z, zh = w.n, w.p, w.y, w.z, w.zh
+            gy = cast(numpy.ndarray, grad(y))
+            return (-1)**idx * dot(k(p) * gy, n) * (z - zh)
+        for idx, (p0, p1, p2) in enumerate(zip(p0_int, p1_int, p2_int)):
+            eta_fac[p2.find] += interior_facet_residual.elemental(
+                p2,
+                p=p0.interpolate(self._forms.get_k()),
+                y=p1.interpolate(self._forms.get_y()),
+                z=p2.interpolate(z),
+                zh=p1.interpolate(zh)
+            )
+
+        # Map per-facet quantities to their incident cells.
+        eta_bnd = numpy.sum(eta_fac[m.t2f], axis=0) / 2
+
+        return eta_int - eta_bnd
+
+
+    @depends_on(pdesol, qpdesol, adjsol, qadjsol)
+    @cached_property
+    def graderr(self) -> numpy.ndarray:
+        '''Gradient L^1 error estimator.'''
+        # Retrieve spaces and mesh.
+        s = self.spaces
+
+        # Assemble interior residual terms.
+        @skfem.Functional
+        def interior_residual(w):
+            y, yh, z, zh = w.y, w.yh, w.z, w.zh
+            gy, gyh, gz, gzh = (
+                cast(numpy.ndarray, grad(f)) for f in (y, yh, z, zh)
+            )
+            return dkdw(w.p) * (dot(gy - gyh, gzh) + dot(gyh, gz - gzh)
+                                + dot(gy - gyh, gz - gzh))
+        eta_int = interior_residual.elemental(
+            s.p2,
+            y=s.p2.interpolate(self.qpdesol),
+            z=s.p2.interpolate(self.qadjsol),
+            yh=s.p2.with_element(s.p1.elem()).interpolate(self.pdesol),
+            zh=s.p2.with_element(s.p1.elem()).interpolate(self.adjsol),
+            p=s.p2.with_element(s.p0.elem()).interpolate(self._forms.get_k())
+        )
+        return numpy.abs(eta_int)
+
     def eval_obj(self) -> float:
         '''
         Evaluate objective to given tolerance.
         '''
-        while (err := numpy.sum((eta := self.objerr))) > self._tol.obj:
-            eta_scaled = self._mesh.params()**2 * eta
-            sort_idx = numpy.argsort(eta_scaled)
-            cum_err = numpy.cumsum(eta_scaled[sort_idx])
-            split_idx = numpy.searchsorted(cum_err, 0.7 * cum_err[-1])
+        while (err := abs(numpy.sum((eta := self.objerr)))) > self._tol.obj:
+            eta = numpy.abs(eta) * self.mesh.param()**2
+            sort_idx = numpy.argsort(eta)
+            cum_err = numpy.cumsum(eta[sort_idx])
+            split_idx = numpy.searchsorted(cum_err, 0.9 * cum_err[-1])
+            if split_idx == cum_err.size:
+                split_idx = cum_err.size - 1
             where = sort_idx[split_idx:]
 
-            print(f'Error = {err}; refining {where.size}/{self._mesh.nelements} cells')
+            print(f'Objective Error = {err}; refining {where.size}/{self._mesh.nelements} cells')
 
             self.mesh = self._mesh.refined(where)
-        print(f'Error = {err}')
+
+        print(f'Objective Error = {err}')
         return self.obj
+
+    def eval_grad(self) -> float:
+        '''
+        Evaluate objective to given tolerance.
+        '''
+        while (err := abs(numpy.sum((eta := self.graderr)))) > self._tol.grad:
+            eta = numpy.abs(eta) * self.mesh.param()**2
+            sort_idx = numpy.argsort(eta)
+            cum_err = numpy.cumsum(eta[sort_idx])
+            split_idx = numpy.searchsorted(cum_err, 0.9 * cum_err[-1])
+            if split_idx == cum_err.size:
+                split_idx = cum_err.size - 1
+            where = sort_idx[split_idx:]
+
+            print(f'Gradient Error = {err}; refining {where.size}/{self._mesh.nelements} cells')
+
+            self.mesh = self._mesh.refined(where)
+
+        print(f'Gradient Error = {err}')
+        return self.grad
