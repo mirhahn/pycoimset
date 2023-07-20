@@ -19,10 +19,11 @@ warnings.filterwarnings('error')
 
 mesh = skfem.MeshTri().refined(4)
 basis_ctrl = skfem.Basis(mesh, skfem.ElementTriP0())
-k = cast(numpy.ndarray, basis_ctrl.project(lambda x: numpy.where(x[0] + x[1] >= 1, 1.0, 0.0)))
-eval = PoissonEvaluator(mesh, k, 1e-7, 1e-5)
-eval.eval_obj()
+#k = cast(numpy.ndarray, basis_ctrl.project(lambda x: numpy.where(x[0] + x[1] >= 1, 1.0, 0.0)))
+k = basis_ctrl.zeros()
+eval = PoissonEvaluator(mesh, k, 1e-5, 1e-5)
 eval.eval_grad()
+eval.eval_obj()
 
 x = eval.pdesol
 qx = eval.qpdesol

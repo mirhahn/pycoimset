@@ -586,7 +586,7 @@ class PoissonEvaluator:
         Evaluate objective to given tolerance.
         '''
         while (err := abs(numpy.sum((eta := self.objerr)))) > self._tol.obj:
-            eta = numpy.abs(eta) * self.mesh.param()**2
+            eta = numpy.abs(eta)
             sort_idx = numpy.argsort(eta)
             cum_err = numpy.cumsum(eta[sort_idx])
             split_idx = numpy.searchsorted(cum_err, 0.9 * cum_err[-1])
@@ -606,7 +606,7 @@ class PoissonEvaluator:
         Evaluate objective to given tolerance.
         '''
         while (err := abs(numpy.sum((eta := self.graderr)))) > self._tol.grad:
-            eta = numpy.abs(eta) * self.vol
+            eta = numpy.abs(eta)
             sort_idx = numpy.argsort(eta)
             cum_err = numpy.cumsum(eta[sort_idx])
             split_idx = numpy.searchsorted(cum_err, 0.9 * cum_err[-1])
