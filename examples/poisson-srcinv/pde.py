@@ -24,10 +24,9 @@ from dataclasses import dataclass, field
 from functools import cached_property
 import math
 import time
-from typing import NamedTuple, Optional, Union, cast
+from typing import NamedTuple, Optional, cast
 
 import numpy
-from numpy.typing import ArrayLike
 import scipy.sparse
 import scipy.sparse.linalg
 import skfem
@@ -96,52 +95,15 @@ def poisson_control_deriv(spc_sol: skfem.Basis, spc_ctrl: skfem.Basis,
     return a_mat
 
 
-def interpolate_local_p2(spc_sol: skfem.Basis, dof_sol: numpy.ndarray,
-                         spc_ctrl: skfem.Basis, dof_ctrl: numpy.ndarray,
-                         src_dens: float
-                         ) -> numpy.ndarray:
-    # Set up discontinuous space.
-    mesh = spc_sol.mesh
-    p2_dg = skfem.Basis(mesh, skfem.ElementDG(skfem.ElementTriP2()))
-
-    # Set up system.
-    @skfem.BilinearForm
-    def bilin(u, v, w):
-        p = w.p
-        gu = cast(numpy.ndarray, grad(u))
-        gv = cast(numpy.ndarray, grad(v))
-        return dot(k(p) * gu, gv)
-    @skfem.LinearForm
-    def lin(v, w):
-        return w.f * v
-
-    a_mat = bilin.assemble(p2_dg, p=p2_dg.with_element(spc_ctrl.elem()).interpolate(dof_ctrl))
-    b_vec = lin.assemble(p2_dg, f=src_dens)
-
-    # Identify nodal values for condensation.
-    p2dg_nodal_dofs = p2_dg.element_dofs[:3].flatten('F')
-    p1_nodal_dofs = dof_sol[spc_sol.nodal_dofs].flatten()
-    p2dg_nodal_values = p1_nodal_dofs[mesh.t].flatten('F')
-
-    # Solve.
-    x0 = numpy.zeros(p2_dg.N)
-    x0[p2dg_nodal_dofs] = p2dg_nodal_values
-    x = skfem.solve(*skfem.condense(a_mat, b_vec, D=p2dg_nodal_dofs, x=x0))
-
-    return x
-
-
 class FunctionSpaces:
     p0: skfem.Basis
     p1: skfem.Basis
     p2: skfem.Basis
-    p2_dg: skfem.Basis
 
     def __init__(self, mesh: skfem.MeshTri):
         self.p0 = skfem.Basis(mesh, skfem.ElementTriP0())
         self.p1 = skfem.Basis(mesh, skfem.ElementTriP1())
         self.p2 = skfem.Basis(mesh, skfem.ElementTriP2())
-        self.p2_dg = skfem.Basis(mesh, skfem.ElementDG(skfem.ElementTriP2()))
 
 
 @tracks_dependencies
@@ -567,11 +529,7 @@ class PoissonEvaluator:
         s = self.spaces
         m = self.mesh
 
-        # Interpolate higher order approximations.
-        qadjsol = interpolate_local_p2(s.p1, self.adjsol, s.p0, self._forms.get_k(), self._forms.get_f())
-        qpdesol = interpolate_local_p2(s.p1, self.pdesol, s.p0, self._forms.get_k(), self._forms.get_f())
-
-        # Define interior residual functional.
+        # Assemble interior residual terms.
         @skfem.Functional
         def interior_residual(w):
             y, yh, z, zh = w.y, w.yh, w.z, w.zh
@@ -580,21 +538,21 @@ class PoissonEvaluator:
             )
             return dkdw(dot(gy - gyh, gz - gzh))
         eta_int = interior_residual.elemental(
-            s.p2_dg,
-            y=s.p2_dg.interpolate(qpdesol),
-            z=s.p2_dg.interpolate(qadjsol),
-            yh=s.p2_dg.with_element(s.p1.elem()).interpolate(self.pdesol),
-            zh=s.p2_dg.with_element(s.p1.elem()).interpolate(self.adjsol),
-            p=s.p2_dg.with_element(s.p0.elem()).interpolate(self._forms.get_k())
+            s.p2,
+            y=s.p2.interpolate(self.qpdesol),
+            z=s.p2.interpolate(self.qadjsol),
+            yh=s.p2.with_element(s.p1.elem()).interpolate(self.pdesol),
+            zh=s.p2.with_element(s.p1.elem()).interpolate(self.adjsol),
+            p=s.p2.with_element(s.p0.elem()).interpolate(self._forms.get_k())
         )
 
         # Create buffer for facet terms.
         fac_buf = numpy.zeros((2, m.nfacets))
 
         # Assemble facet terms.
-        p2s = [skfem.InteriorFacetBasis(m, s.p2_dg.elem(), side=0),
-               skfem.InteriorFacetBasis(m, s.p2_dg.elem(), side=1),
-               skfem.FacetBasis(m, s.p2_dg.elem(), side=0, facets=['right', 'bottom'])]
+        p2s = [skfem.InteriorFacetBasis(m, s.p2.elem(), side=0),
+               skfem.InteriorFacetBasis(m, s.p2.elem(), side=1),
+               skfem.FacetBasis(m, s.p2.elem(), side=0, facets=['right', 'bottom'])]
         p1s = [skfem.InteriorFacetBasis(m, s.p1.elem(), side=0, quadrature=p2s[0].quadrature),
                skfem.InteriorFacetBasis(m, s.p1.elem(), side=1, quadrature=p2s[1].quadrature),
                skfem.FacetBasis(m, s.p1.elem(), side=0, facets=['right', 'bottom'], quadrature=p2s[2].quadrature)]
@@ -610,13 +568,13 @@ class PoissonEvaluator:
                 p2,
                 idx=side,
                 y=p1.interpolate(self.adjsol),
-                z=p2.interpolate(qpdesol),
+                z=p2.interpolate(self.qpdesol),
                 zh=p1.interpolate(self.pdesol)
             ) + facet_residual.elemental(
                 p2,
                 idx=side,
                 y=p1.interpolate(self.pdesol),
-                z=p2.interpolate(qadjsol),
+                z=p2.interpolate(self.qadjsol),
                 zh=p1.interpolate(self.adjsol)
             )
 
@@ -648,7 +606,7 @@ class PoissonEvaluator:
         Evaluate objective to given tolerance.
         '''
         while (err := abs(numpy.sum((eta := self.graderr)))) > self._tol.grad:
-            eta = numpy.abs(eta) * self.mesh.param()**2
+            eta = numpy.abs(eta) * self.vol
             sort_idx = numpy.argsort(eta)
             cum_err = numpy.cumsum(eta[sort_idx])
             split_idx = numpy.searchsorted(cum_err, 0.9 * cum_err[-1])
