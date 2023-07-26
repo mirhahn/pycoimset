@@ -36,11 +36,11 @@ from util import notify_property_update, tracks_dependencies, depends_on
 
 
 def k(w):
-    return 0.01 + 0.99 * w
+    return 0.1 + 0.9 * w
 
 
-def dkdw(d):
-    return 0.99 * d
+def dkdw():
+    return 0.9
 
 
 def poisson_system(spc_sol: skfem.Basis, spc_ctrl: skfem.Basis,
@@ -78,7 +78,7 @@ def poisson_system(spc_sol: skfem.Basis, spc_ctrl: skfem.Basis,
 
 
 def poisson_control_deriv(spc_sol: skfem.Basis, spc_ctrl: skfem.Basis,
-                          ctrl: numpy.ndarray, pde_sol: numpy.ndarray
+                          _: numpy.ndarray, pde_sol: numpy.ndarray
                           ) -> scipy.sparse.spmatrix:
     # Get mesh.
     mesh = spc_sol.mesh
@@ -87,12 +87,51 @@ def poisson_control_deriv(spc_sol: skfem.Basis, spc_ctrl: skfem.Basis,
     # Assemble cell integral.
     @skfem.BilinearForm
     def interior_form(u, v, w):
-        return dot(dkdw(v) * grad(w.y), grad(u))    # pyright: ignore
+        return dot(dkdw() * v * grad(w.y), grad(u))    # pyright: ignore
     a_mat = interior_form.assemble(
         spc_sol, spc_ctrl, y=spc_sol.interpolate(pde_sol)
     )
 
     return a_mat
+
+
+def calculate_p2_laplace(spc: skfem.Basis, func_dofs: numpy.ndarray
+                         ) -> numpy.ndarray:
+    '''Calculate Laplace of P2 function as P0 function.'''
+    # Create basis for gradient space.
+    spc_quad = skfem.Basis(spc.mesh, skfem.ElementTriP1())
+    spc_tgt = spc_quad.with_element(skfem.ElementTriP0())
+    spc_out = skfem.Basis(spc.mesh, skfem.ElementTriP0())
+
+    # Assemble bilinear form.
+    @skfem.BilinearForm
+    def bilin(u, v, _):
+        return u * v
+    a_mat = bilin.assemble(spc_tgt)
+
+    # Assemble linear form.
+    @skfem.LinearForm
+    def lin(v, w):
+        return (-1)**w.idx * dot(grad(w.y), w.n) * v
+
+    b_vec = numpy.zeros((2, spc_out.N))
+    for idx, cls in (
+        (0, skfem.InteriorFacetBasis),
+        (1, skfem.InteriorFacetBasis),
+        (0, skfem.FacetBasis)
+    ):
+        p1 = cls(spc.mesh, skfem.ElementTriP1(), side=idx)
+        p2 = cls(spc.mesh, spc.elem(), facets=p1.find,
+                 quadrature=p1.quadrature, side=idx)
+        p0 = cls(spc.mesh, skfem.ElementTriP0(), facets=p1.find,
+                 quadrature=p1.quadrature, side=idx)
+
+        b_vec[idx, :] += lin.assemble(p0, y=p2.interpolate(func_dofs),
+                                      idx=idx)
+    b_vec = b_vec[0] - b_vec[1]
+
+    # Solve for degrees of freedom.
+    return skfem.solve(a_mat, b_vec)
 
 
 class FunctionSpaces:
@@ -529,21 +568,30 @@ class PoissonEvaluator:
         s = self.spaces
         m = self.mesh
 
+        # Interpolate gradients.
+        lpl_qpdesol = calculate_p2_laplace(s.p2, self.qpdesol)
+        lpl_qadjsol = calculate_p2_laplace(s.p2, self.qadjsol)
+
         # Assemble interior residual terms.
         @skfem.Functional
         def interior_residual(w):
-            y, yh, z, zh = w.y, w.yh, w.z, w.zh
-            gy, gyh, gz, gzh = (
-                cast(numpy.ndarray, grad(f)) for f in (y, yh, z, zh)
-            )
-            return dkdw(dot(gy - gyh, gz - gzh))
+            ly, z, zh, p, f = w.ly, w.z, w.zh, w.p, w.f
+            return -dkdw() / (2 * k(p)) * f * (z - zh)
         eta_int = interior_residual.elemental(
             s.p2,
-            y=s.p2.interpolate(self.qpdesol),
             z=s.p2.interpolate(self.qadjsol),
-            yh=s.p2.with_element(s.p1.elem()).interpolate(self.pdesol),
             zh=s.p2.with_element(s.p1.elem()).interpolate(self.adjsol),
-            p=s.p2.with_element(s.p0.elem()).interpolate(self._forms.get_k())
+            ly=s.p2.with_element(s.p0.elem()).interpolate(lpl_qpdesol),
+            p=s.p2.with_element(s.p0.elem()).interpolate(self._forms.get_k()),
+            f=self._forms.get_f()
+        )
+        eta_int += interior_residual.elemental(
+            s.p2,
+            z=s.p2.interpolate(self.qpdesol),
+            zh=s.p2.with_element(s.p1.elem()).interpolate(self.pdesol),
+            ly=s.p2.with_element(s.p0.elem()).interpolate(lpl_qadjsol),
+            p=s.p2.with_element(s.p0.elem()).interpolate(self._forms.get_k()),
+            f=self._forms.get_f()
         )
 
         # Create buffer for facet terms.
@@ -551,45 +599,68 @@ class PoissonEvaluator:
 
         # Assemble facet terms.
         p2s = [skfem.InteriorFacetBasis(m, s.p2.elem(), side=0),
-               skfem.InteriorFacetBasis(m, s.p2.elem(), side=1),
-               skfem.FacetBasis(m, s.p2.elem(), side=0, facets=['right', 'bottom'])]
+               skfem.InteriorFacetBasis(m, s.p2.elem(), side=1)]
         p1s = [skfem.InteriorFacetBasis(m, s.p1.elem(), side=0, quadrature=p2s[0].quadrature),
-               skfem.InteriorFacetBasis(m, s.p1.elem(), side=1, quadrature=p2s[1].quadrature),
-               skfem.FacetBasis(m, s.p1.elem(), side=0, facets=['right', 'bottom'], quadrature=p2s[2].quadrature)]
-        sides = [0, 1, 0]
+               skfem.InteriorFacetBasis(m, s.p1.elem(), side=1, quadrature=p2s[1].quadrature)]
+        sides = [0, 1]
 
         @skfem.Functional
-        def facet_residual(w):
-            idx, n, y, z, zh = w.idx, w.n, w.y, w.z, w.zh
+        def interior_facet_residual(w):
+            idx, n, y, yh, z, zh = w.idx, w.n, w.y, w.yh, w.z, w.zh
             gy = cast(numpy.ndarray, grad(y))
-            return (-1)**idx * dkdw(dot(gy, n) * (z - zh))
+            gyh = cast(numpy.ndarray, grad(yh))
+            return (-1)**idx * dkdw() * dot((gy + gyh) / 2, n) * (z - zh)
         for p2, p1, side in zip(p2s, p1s, sides):
-            fac_buf[side, p2.find] = facet_residual.elemental(
+            fac_buf[side, p2.find] = interior_facet_residual.elemental(
                 p2,
                 idx=side,
-                y=p1.interpolate(self.adjsol),
+                y=p2.interpolate(self.qadjsol),
+                yh=p1.interpolate(self.adjsol),
                 z=p2.interpolate(self.qpdesol),
                 zh=p1.interpolate(self.pdesol)
-            ) + facet_residual.elemental(
+            ) + interior_facet_residual.elemental(
                 p2,
                 idx=side,
-                y=p1.interpolate(self.pdesol),
+                y=p2.interpolate(self.qpdesol),
+                yh=p1.interpolate(self.pdesol),
                 z=p2.interpolate(self.qadjsol),
                 zh=p1.interpolate(self.adjsol)
             )
 
+        # Assemble Neumann facet terms.
+        p2 = skfem.FacetBasis(m, s.p2.elem(), facets=['right', 'bottom'])
+        p1 = skfem.FacetBasis(m, s.p1.elem(), facets=p2.find,
+                              quadrature=p2.quadrature)
+
+        @skfem.Functional
+        def neumann_facet_residual(w):
+            n, yh, z, zh = w.n, w.yh, w.z, w.zh
+            gyh = cast(numpy.ndarray, grad(yh))
+            return dkdw() * dot(gyh / 2, n) * (z - zh)
+        fac_buf[0, p2.find] = neumann_facet_residual.elemental(
+            p2,
+            yh=p1.interpolate(self.adjsol),
+            z=p2.interpolate(self.qpdesol),
+            zh=p1.interpolate(self.pdesol)
+        ) + neumann_facet_residual.elemental(
+            p2,
+            yh=p1.interpolate(self.pdesol),
+            z=p2.interpolate(self.qadjsol),
+            zh=p1.interpolate(self.adjsol)
+        )
+
         numpy.add.at(eta_int, m.f2t, fac_buf)
-        return eta_int
+        return numpy.abs(eta_int)
 
     def eval_obj(self) -> float:
         '''
         Evaluate objective to given tolerance.
         '''
         while (err := abs(numpy.sum((eta := self.objerr)))) > self._tol.obj:
-            eta = numpy.abs(eta) * self.mesh.param()**2
+            eta = numpy.abs(eta)
             sort_idx = numpy.argsort(eta)
             cum_err = numpy.cumsum(eta[sort_idx])
-            split_idx = numpy.searchsorted(cum_err, 0.9 * cum_err[-1])
+            split_idx = numpy.searchsorted(cum_err, 0.7 * cum_err[-1])
             if split_idx == cum_err.size:
                 split_idx = cum_err.size - 1
             where = sort_idx[split_idx:]
@@ -605,11 +676,11 @@ class PoissonEvaluator:
         '''
         Evaluate objective to given tolerance.
         '''
-        while (err := abs(numpy.sum((eta := self.graderr)))) > self._tol.grad:
-            eta = numpy.abs(eta) * self.vol
+        while (err := numpy.sum((eta := self.graderr))) > self._tol.grad:
+            eta = numpy.abs(eta)
             sort_idx = numpy.argsort(eta)
             cum_err = numpy.cumsum(eta[sort_idx])
-            split_idx = numpy.searchsorted(cum_err, 0.9 * cum_err[-1])
+            split_idx = numpy.searchsorted(cum_err, 0.7 * cum_err[-1])
             if split_idx == cum_err.size:
                 split_idx = cum_err.size - 1
             where = sort_idx[split_idx:]

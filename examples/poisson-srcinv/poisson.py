@@ -17,11 +17,11 @@ from pde import PoissonEvaluator
 resource.setrlimit(resource.RLIMIT_DATA, (2 * 2**30, 3 * 2**30))
 warnings.filterwarnings('error')
 
-mesh = skfem.MeshTri().refined(4)
+mesh = skfem.MeshTri().refined(5)
 basis_ctrl = skfem.Basis(mesh, skfem.ElementTriP0())
-#k = cast(numpy.ndarray, basis_ctrl.project(lambda x: numpy.where(x[0] + x[1] >= 1, 1.0, 0.0)))
-k = basis_ctrl.zeros()
-eval = PoissonEvaluator(mesh, k, 1e-5, 1e-5)
+k = cast(numpy.ndarray, basis_ctrl.project(lambda x: numpy.where(x[0] + x[1] >= 1, 1.0, 0.0)))
+#k = basis_ctrl.zeros()
+eval = PoissonEvaluator(mesh, k, 1e-6, 1e-6)
 eval.eval_grad()
 eval.eval_obj()
 
@@ -36,7 +36,7 @@ eg = eval.graderr
 
 print(f'Objective value: {f}')
 print(f'Objective error: {abs(numpy.sum(ef))}')
-print(f'Gradient error: {abs(numpy.sum(eg))}')
+print(f'Gradient error: {numpy.sum(eg)}')
 
 for val, basis_or_mesh, name, kwargs in (
     (k, basis_ctrl, 'Control', {}),
