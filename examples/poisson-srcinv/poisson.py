@@ -5,49 +5,33 @@ Solver for the "Topology optimisation of heat conduction problems
 governed by the Poisson equation" example of the 
 '''
 
+import logging
 import resource
-from typing import cast
 import warnings
 
 import numpy
 import skfem
 
-from pde import PoissonEvaluator
+from functionals import MeasureFunctional, ObjectiveFunctional
+from pycoimset.solver.unconstrained import SolverParameters
+from space import SimilaritySpace, BoolArrayClass
 
+from pycoimset import MOMSolver
+
+logging.disable(logging.WARNING)
 resource.setrlimit(resource.RLIMIT_DATA, (2 * 2**30, 3 * 2**30))
-warnings.filterwarnings('error')
+warnings.simplefilter('error')
 
-mesh = skfem.MeshTri().refined(5)
-basis_ctrl = skfem.Basis(mesh, skfem.ElementTriP0())
-k = cast(numpy.ndarray, basis_ctrl.project(lambda x: numpy.where(x[0] + x[1] >= 1, 1.0, 0.0)))
-#k = basis_ctrl.zeros()
-eval = PoissonEvaluator(mesh, k, 1e-6, 1e-6)
-eval.eval_grad()
-eval.eval_obj()
+initial_mesh = skfem.MeshTri().refined(4)
+assert isinstance(initial_mesh, skfem.MeshTri)
 
-x = eval.pdesol
-qx = eval.qpdesol
-z = eval.adjsol
-qz = eval.qadjsol
-g = (1 - 2 * eval._forms.get_k()) * eval.grad / eval.vol
-f = eval.obj
-ef = eval.objerr
-eg = eval.graderr
+space = SimilaritySpace(initial_mesh)
+ctrl = BoolArrayClass(space, space.mesh)
 
-print(f'Objective value: {f}')
-print(f'Objective error: {abs(numpy.sum(ef))}')
-print(f'Gradient error: {numpy.sum(eg)}')
-
-for val, basis_or_mesh, name, kwargs in (
-    (k, basis_ctrl, 'Control', {}),
-    (x, eval.spaces.p1, 'State', {'shading': 'gouraud'}),
-    (z, eval.spaces.p1, 'Adjoint State', {'shading': 'gouraud'}),
-    (g, eval.spaces.p0, 'Gradient', {}),
-    (ef, eval.mesh, 'Objective Error', {}),
-    (eg, eval.mesh, 'Gradient Error', {}),
-):
-    ax = basis_or_mesh.plot(val, colorbar=True, nref=0, **kwargs)
-    ax = eval.mesh.draw(ax=ax, plot_kwargs={'alpha': 0.25})
-    ax = mesh.draw(ax=ax)
-    ax.set_title(name)
-    ax.show()
+solver = MOMSolver(
+    ObjectiveFunctional(space),
+    [MeasureFunctional(space) <= 0.1],
+    initial_solution=ctrl,
+    params=SolverParameters(abstol=1e-4, thres_accept=0.1)
+)
+solver.solve()

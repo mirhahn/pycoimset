@@ -19,7 +19,6 @@ Implementations of the basic unconstrained optimization loop.
 from dataclasses import dataclass
 from enum import IntEnum
 import math
-from types import NotImplementedType
 from typing import Generic, NamedTuple, Optional, TypeVar
 
 import numpy
@@ -84,7 +83,7 @@ class SolverParameters(JSONSerializable):
     #: Error tuning parameter. Regulates the ratio between
     #: instationarity error and absolute termination tolerance.
     #: Must be strictly between 0 and 1.
-    margin_instat: float = 0.25
+    margin_instat: float = 0.5
 
     #: Initial trust region radius. This will be clamped to be a number
     #: strictly greater than 0 and less than or equal to the maximal step
@@ -144,13 +143,11 @@ class SolverStats:
     #: Total wall time spent in the optimization loop (in seconds).
     t_total: float = 0.0
 
-    def __add__(self, other) -> 'SolverStats | NotImplementedType':
-        if not isinstance(other, SolverStats):
-            return NotImplemented
-        return SolverStats(
-            n_iter=self.n_iter + other.n_iter,
-            t_total=self.t_total + other.t_total,
-        )
+    #: Measure of last step.
+    last_step: float = 0.0
+
+    #: Number of rejected steps.
+    n_reject: int = 0
 
 
 class SolverStatus(IntEnum):
@@ -290,6 +287,13 @@ class Solution(Generic[Spc]):
 
         return self._instat
 
+    def invalidate(self) -> None:
+        '''Invalidate all cached results.'''
+        self._instat = None
+        self._fullstep = None
+        self._grad = None
+        self._val = None
+
 
 class Solver(Generic[Spc]):
     """
@@ -418,6 +422,11 @@ class Solver(Generic[Spc]):
         if tau is None:
             tau = max(eps, self.solution.instationarity.value)
 
+        # Fall back to measure of universal set if full step appears
+        # empty.
+        if numpy.isclose(mu_full, 0.0):
+            mu_full = self.objective.input_space.measure
+
         # Calculate lower bound for projected descent.
         expected_step_ratio = step_quality * min(
             1.0, radius / mu_full
@@ -491,7 +500,6 @@ class Solver(Generic[Spc]):
             self.status = SolverStatus.STATIONARY
             return
 
-        n_reject = 0
         accepted = False
         while not accepted:
             # Find step.
@@ -531,13 +539,7 @@ class Solver(Generic[Spc]):
 
                 # Increment iteration counter and output log line.
                 self.stats.n_iter += 1
-                self.logger.push_line(
-                    iter=self.stats.n_iter,
-                    obj=self.solution.val.value,
-                    instat=self.solution.instationarity.value,
-                    step=step.measure,
-                    tr_fail=n_reject
-                )
+                self.stats.last_step = step.measure
 
                 # Check whether to increase the trust region radius.
                 if step_quality >= self.param.thres_tr_expand:
@@ -555,7 +557,7 @@ class Solver(Generic[Spc]):
                     return
 
                 # Increase rejection counter.
-                n_reject += 1
+                self.stats.n_reject += 1
 
             # Adjust error tolerances.
             obj_tol, grad_tol, step_tol = self._tolerances(tau.value, step_quality)
@@ -573,13 +575,20 @@ class Solver(Generic[Spc]):
             instat=self.solution.instationarity.value
         )
 
-        n_iter = 0
+        old_iter = self.stats.n_iter
         max_iter = self.param.max_iter
         self.status = SolverStatus.RUNNING
         while (self.status.is_running and
-               (max_iter is None or n_iter < max_iter)):
+               (max_iter is None or self.stats.n_iter - old_iter < max_iter)):
+            old_reject = self.stats.n_reject
             self.step()
-            n_iter += 1
+            self.logger.push_line(
+                iter=self.stats.n_iter,
+                obj=self.solution.val.value,
+                instat=self.solution.instationarity.value,
+                step=self.stats.last_step,
+                tr_fail=self.stats.n_reject - old_reject
+            )
 
         if self.status.is_running:
             self.status = SolverStatus.ERROR_MAX_ITER

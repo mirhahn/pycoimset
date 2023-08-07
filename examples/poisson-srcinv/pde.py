@@ -32,7 +32,7 @@ import scipy.sparse.linalg
 import skfem
 from skfem.helpers import dot, grad
 
-from util import notify_property_update, tracks_dependencies, depends_on
+from pycoimset.util import notify_property_update, tracks_dependencies, depends_on
 
 
 def k(w):
@@ -112,7 +112,8 @@ def calculate_p2_laplace(spc: skfem.Basis, func_dofs: numpy.ndarray
     # Assemble linear form.
     @skfem.LinearForm
     def lin(v, w):
-        return (-1)**w.idx * dot(grad(w.y), w.n) * v
+        gy = cast(numpy.ndarray, grad(w.y))
+        return (-1)**w.idx * dot(gy, w.n) * v
 
     b_vec = numpy.zeros((2, spc_out.N))
     for idx, cls in (
@@ -131,7 +132,7 @@ def calculate_p2_laplace(spc: skfem.Basis, func_dofs: numpy.ndarray
     b_vec = b_vec[0] - b_vec[1]
 
     # Solve for degrees of freedom.
-    return skfem.solve(a_mat, b_vec)
+    return cast(numpy.ndarray, skfem.solve(a_mat, b_vec))
 
 
 class FunctionSpaces:
@@ -405,6 +406,10 @@ class PoissonEvaluator:
         '''Evaluation tolerances.'''
         return self._tol
 
+    @tol.setter
+    def tol(self, tol: 'PoissonEvaluator.Tolerances') -> None:
+        self._tol = tol
+
     @depends_on(mesh)
     @cached_property
     def pdesol(self) -> numpy.ndarray:
@@ -568,20 +573,15 @@ class PoissonEvaluator:
         s = self.spaces
         m = self.mesh
 
-        # Interpolate gradients.
-        lpl_qpdesol = calculate_p2_laplace(s.p2, self.qpdesol)
-        lpl_qadjsol = calculate_p2_laplace(s.p2, self.qadjsol)
-
         # Assemble interior residual terms.
         @skfem.Functional
         def interior_residual(w):
-            ly, z, zh, p, f = w.ly, w.z, w.zh, w.p, w.f
+            z, zh, p, f = w.z, w.zh, w.p, w.f
             return -dkdw() / (2 * k(p)) * f * (z - zh)
         eta_int = interior_residual.elemental(
             s.p2,
             z=s.p2.interpolate(self.qadjsol),
             zh=s.p2.with_element(s.p1.elem()).interpolate(self.adjsol),
-            ly=s.p2.with_element(s.p0.elem()).interpolate(lpl_qpdesol),
             p=s.p2.with_element(s.p0.elem()).interpolate(self._forms.get_k()),
             f=self._forms.get_f()
         )
@@ -589,7 +589,6 @@ class PoissonEvaluator:
             s.p2,
             z=s.p2.interpolate(self.qpdesol),
             zh=s.p2.with_element(s.p1.elem()).interpolate(self.pdesol),
-            ly=s.p2.with_element(s.p0.elem()).interpolate(lpl_qadjsol),
             p=s.p2.with_element(s.p0.elem()).interpolate(self._forms.get_k()),
             f=self._forms.get_f()
         )
@@ -665,12 +664,10 @@ class PoissonEvaluator:
                 split_idx = cum_err.size - 1
             where = sort_idx[split_idx:]
 
-            print(f'Objective Error = {err}; refining {where.size}/{self._mesh.nelements} cells')
-
-            self.mesh = self._mesh.refined(where)
-
-        print(f'Objective Error = {err}')
-        return self.obj
+            rmesh = self._mesh.refined(where)
+            assert isinstance(rmesh, skfem.MeshTri)
+            self.mesh = rmesh
+        return err
 
     def eval_grad(self) -> float:
         '''
@@ -685,9 +682,7 @@ class PoissonEvaluator:
                 split_idx = cum_err.size - 1
             where = sort_idx[split_idx:]
 
-            print(f'Gradient Error = {err}; refining {where.size}/{self._mesh.nelements} cells')
-
-            self.mesh = self._mesh.refined(where)
-
-        print(f'Gradient Error = {err}')
-        return self.grad
+            rmesh = self._mesh.refined(where)
+            assert isinstance(rmesh, skfem.MeshTri)
+            self.mesh = rmesh
+        return err
