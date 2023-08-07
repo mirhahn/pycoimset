@@ -807,7 +807,7 @@ class BarrierSolver(Generic[Spc]):
                 tau, tau_err = self._sol.instationarity
                 continue
 
-            # Calculate step quality.
+            # Calculate functional values at new solution. Reject if non-interior.
             new_sol = BarrierSolution(
                 self._sol.func,
                 self._sol.x ^ step,
@@ -816,6 +816,26 @@ class BarrierSolver(Generic[Spc]):
                 grad_tol,
                 self._sol.eps
             )
+            new_val, new_err = new_sol.f
+            if numpy.any(new_val[1:] - new_err[1:] < 0.0):
+                # Decrease trust region radius.
+                self._r /= 2
+
+                # Terminate if step is too small.
+                if self._r < 1000 * numpy.finfo(float).eps:
+                    self._status = type(self).Status.SmallStep
+
+                # Increase rejection counter.
+                self._stats.n_reject += 1
+
+                # Adjust error tolerances.
+                bar_tol, grad_tol, step_tol = self._errtol(tau, None)
+                self._sol.val_tol = bar_tol
+                self._sol.grad_tol = grad_tol
+                tau, tau_err = self._sol.instationarity
+                continue
+
+            # Calculate step quality.
             new_val, new_val_err = new_sol.F
             rho = (new_val - val) / prchg
             rho_err = (new_val_err + val_err) / prchg
@@ -854,6 +874,7 @@ class BarrierSolver(Generic[Spc]):
             bar_tol, grad_tol, step_tol = self._errtol(tau, rho)
             self._sol.val_tol = bar_tol
             self._sol.grad_tol = grad_tol
+            tau, tau_err = self._sol.instationarity
 
     def solve(self) -> None:
         '''
