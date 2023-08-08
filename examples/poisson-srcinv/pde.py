@@ -655,7 +655,8 @@ class PoissonEvaluator:
         '''
         Evaluate objective to given tolerance.
         '''
-        while (err := abs(numpy.sum((eta := self.objerr)))) > self._tol.obj:
+        while ((err := abs(numpy.sum((eta := self.objerr)).item()))
+               > self._tol.obj):
             eta = numpy.abs(eta)
             sort_idx = numpy.argsort(eta)
             cum_err = numpy.cumsum(eta[sort_idx])
@@ -673,7 +674,8 @@ class PoissonEvaluator:
         '''
         Evaluate objective to given tolerance.
         '''
-        while (err := numpy.sum((eta := self.graderr))) > self._tol.grad:
+        while ((err := numpy.sum((eta := self.graderr)).item())
+               > self._tol.grad):
             eta = numpy.abs(eta)
             sort_idx = numpy.argsort(eta)
             cum_err = numpy.cumsum(eta[sort_idx])

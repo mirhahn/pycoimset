@@ -33,7 +33,8 @@ def dep_str(dep: Dependency) -> str:
 
 
 def depends_on(*deps: Dependency | tuple[Dependency, Callable[[Any], bool]]
-               ) -> Callable[[functools.cached_property[T]], functools.cached_property[T]]:
+               ) -> Callable[[functools.cached_property[T]],
+                             functools.cached_property[T]]:
     def dec(func: functools.cached_property):
         if len(deps) > 0:
             try:
@@ -52,43 +53,42 @@ def depends_on(*deps: Dependency | tuple[Dependency, Callable[[Any], bool]]
 
 
 @functools.singledispatch
-def notify_property_update(self, name):
+def notify_property_update(self, name):                     # pyright: ignore
     raise NotImplementedError()
 
 
 def tracks_dependencies(cls: Type[T]) -> Type[T]:
-        # Build the map of dependents.
-        deps_map = {}
-        for member in cls.__dict__.values():
-            if not isinstance(member, functools.cached_property):
+    # Build the map of dependents.
+    deps_map = {}
+    for member in cls.__dict__.values():
+        if not isinstance(member, functools.cached_property):
+            continue
+        try:
+            deps = cast(tuple[QualifiedDependency], getattr(member, 'dependencies'))
+            for dep in deps:
+                name = dep_str(dep.dep)
+                deps_map[name] = (*deps_map.get(name, tuple()), (member, dep.pred))
+        except AttributeError:
+            pass
+
+    # Build update handler.
+    def notify_update(self, prop):
+        stack = [*deps_map.get(prop, tuple())]
+        visited = set()
+        while len(stack) > 0:
+            child, pred = cast(tuple[functools.cached_property, Optional[Callable[[Any], bool]]], stack.pop())
+            if (
+                child.attrname is None or child.func.__name__ in visited
+                or (pred is not None and not pred(self))
+            ):
                 continue
-
             try:
-                deps = cast(list[QualifiedDependency], getattr(member, 'dependencies'))
-                for dep in deps:
-                    name = dep_str(dep.dep)
-                    deps_map[name] = (*deps_map.get(dep, tuple()), (member, dep.pred))
-            except AttributeError:
+                del self.__dict__[child.attrname]
+                if child.func.__name__ in deps_map:
+                    stack.extend(deps_map[child.func.__name__])
+            except KeyError:
                 pass
+            visited.add(child.func.__name__)
+    notify_property_update.register(cls, notify_update)
 
-        # Build update handler.
-        def notify_update(self, prop):
-            stack = [*deps_map.get(prop, tuple())]
-            visited = set()
-            while len(stack) > 0:
-                child, pred = cast(tuple[functools.cached_property, Optional[Callable[[Any], bool]]], stack.pop())
-                if (
-                    child.attrname is None or child.func.__name__ in visited
-                    or (pred is not None and not pred(self))
-                ):
-                    continue
-                try:
-                    del self.__dict__[child.attrname]
-                    if child.func.__name__ in deps_map:
-                        stack.extend(deps_map[child.func.__name__])
-                except KeyError:
-                    pass
-                visited.add(child.func.__name__)
-        notify_property_update.register(cls, notify_update)
-
-        return cls
+    return cls

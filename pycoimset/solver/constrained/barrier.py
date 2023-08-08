@@ -10,6 +10,7 @@ import math
 from typing import Generator, Generic, Optional, Sequence, TypeVar
 
 import numpy
+from numpy.typing import ArrayLike
 
 from ..unconstrained import SolverParameters as UnconstrainedParameters
 from ...step import SteepestDescentStepFinder
@@ -41,12 +42,14 @@ Spc = TypeVar('Spc', bound=SimilaritySpace)
 class BarrierFunctionals(Generic[Spc]):
     obj: Functional[Spc]
     con: list[Functional[Spc]]
+    vwgt: Optional[numpy.ndarray] = None
+    gwgt: Optional[numpy.ndarray] = None
 
     def __len__(self) -> int:
         '''Total number of functionals.'''
         return 1 + len(self.con)
 
-    def comp_tol(self, tol: float, mu: float) -> numpy.ndarray:
+    def comp_tol(self, tol: float, mu: float, wgt: Optional[ArrayLike] = None) -> numpy.ndarray:
         '''
         Distribute error tolerance among functionals.
 
@@ -56,6 +59,10 @@ class BarrierFunctionals(Generic[Spc]):
             Total tolerance to be distributed.
         mu : float
             Barrier parameter. Must be strictly positive.
+        wgt : array-like, optional
+            Vector of functional weights for error tolerance
+            apportionment. Must be broadcastable to a 1-D array with
+            one element per functional.
 
         Returns
         -------
@@ -71,8 +78,14 @@ class BarrierFunctionals(Generic[Spc]):
         For the constraint functionals, this yields the error
         apportioned to the logarithm of the functional value.
         '''
-        base = tol / (1 + mu * len(self.con))
-        return base * numpy.concatenate((1, numpy.full(len(self.con), mu)))
+        if not numpy.isfinite(tol):
+            return numpy.broadcast_to(tol, len(self))
+        if wgt is None:
+            wgt = 1.0
+        wgt = numpy.abs(numpy.broadcast_to(wgt, len(self)))
+        wgt[1:] *= mu
+        wgt_sum = numpy.sum(wgt)
+        return (wgt / wgt_sum) * tol 
 
     def functionals(self) -> Generator[Functional[Spc], None, None]:
         '''Iterates over all functionals.'''
@@ -337,7 +350,7 @@ class BarrierSolution(Generic[Spc]):
         error on the logarithm's derivative can halve the gradient
         tolerance at worst.
         '''
-        tol = self._f.comp_tol(self._tolf, self._mu)
+        tol = self._f.comp_tol(self._tolf, self._mu, self._f.vwgt)
         val = numpy.empty_like(tol)
         err = numpy.empty_like(tol)
 
@@ -394,7 +407,7 @@ class BarrierSolution(Generic[Spc]):
                              'violations)')
 
         # Apportion tolerances.
-        tol = self._f.comp_tol(self._tolg, self._mu)
+        tol = self._f.comp_tol(self._tolg, self._mu, self._f.gwgt)
 
         # Set up output.
         grad = []
@@ -576,6 +589,8 @@ class BarrierSolver(Generic[Spc]):
 
     def __init__(self, obj: Functional[Spc],
                  con: Sequence[Constraint[Spc]],
+                 err_wgt: Optional[ArrayLike] = None,
+                 grad_err_wgt: Optional[ArrayLike] = None,
                  x0: Optional[SimilarityClass[Spc]] = None,
                  param: Optional[Parameters] = None,
                  *args, **kwargs):
@@ -616,8 +631,23 @@ class BarrierSolver(Generic[Spc]):
         # Create default solution.
         if x0 is None:
             x0 = obj.input_space.empty_class
+        if err_wgt is not None:
+            err_wgt = numpy.broadcast_to(numpy.asarray(err_wgt, dtype=float),
+                                         1 + len(con_func))
+        if grad_err_wgt is not None:
+            grad_err_wgt = numpy.broadcast_to(
+                numpy.asarray(grad_err_wgt, dtype=float),
+                1 + len(con_func)
+            )
+        elif err_wgt is not None:
+            grad_err_wgt = err_wgt
         self._sol = BarrierSolution[Spc](
-            BarrierFunctionals[Spc](obj, con_func),
+            BarrierFunctionals[Spc](
+                obj,
+                con_func,
+                vwgt=err_wgt,
+                gwgt=grad_err_wgt
+            ),
             x0,
             mu=self._par.mu_init,
             eps=self._par.con_eps
@@ -666,7 +696,8 @@ class BarrierSolver(Generic[Spc]):
 
         # Guess instationarity if no guess is given.
         if tau is None:
-            tau = max(eps, self._sol.instationarity[0])
+            tau = self._sol.instationarity[0]
+        tau = max(eps, tau)
 
         # Fall back to measure of universal set if full step appears
         # empty.
@@ -838,7 +869,7 @@ class BarrierSolver(Generic[Spc]):
             # Calculate step quality.
             new_val, new_val_err = new_sol.F
             rho = (new_val - val) / prchg
-            rho_err = (new_val_err + val_err) / prchg
+            rho_err = (new_val_err + val_err) / abs(prchg)
 
             # Update curvature estimate.
             self._updcurv(step.measure, prchg, new_val - val)
