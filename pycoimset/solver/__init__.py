@@ -15,10 +15,12 @@
 """
 Main loop implementations.
 """
-from .constrained import BarrierSolver
+from .barrier import BarrierSolver
+from .penalty import PenaltySolver
 from .unconstrained import Solver as UnconstrainedSolver
 
 __all__ = [
     'BarrierSolver',
+    'PenaltySolver',
     'UnconstrainedSolver',
 ]

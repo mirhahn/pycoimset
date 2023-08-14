@@ -2,7 +2,7 @@
 Python library for continuous optimization with set-valued variables.
 '''
 
-from .solver import BarrierSolver, UnconstrainedSolver
+from .solver import BarrierSolver, PenaltySolver, UnconstrainedSolver
 from .step import SteepestDescentStepFinder
 from .typing import (
     Constraint,
@@ -23,6 +23,7 @@ __all__ = [
     'Functional',
     'JSONSerializable',
     'Operator',
+    'PenaltySolver',
     'UnconstrainedSolver',
     'UnconstrainedStepFinder',
     'SimilarityClass',

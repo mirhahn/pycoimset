@@ -1,6 +1,8 @@
 '''Measure space implementation for the Poisson problem.'''
 
 from functools import cached_property, singledispatchmethod
+import logging
+import math
 import operator
 from types import NotImplementedType
 from typing import Generic, Optional, Protocol, Self, TypeVar, cast
@@ -20,6 +22,9 @@ __all__ = [
     'SimilarityClass',
     'BoolArrayClass'
 ]
+
+
+logger = logging.getLogger(__name__)
 
 
 M = TypeVar('M', bound=skfem.MeshTri)
@@ -79,7 +84,7 @@ class Mesh(Generic[M]):
         '''Total measure of domain.'''
         return self.element_measure.sum()
 
-    def is_child(self, parent: Self | M) -> bool:
+    def is_refinement_of(self, parent: Self | M) -> bool:
         '''Test whether this mesh is a refinement of another.'''
         if isinstance(parent, Mesh):
             pred = lambda x: x is parent
@@ -120,8 +125,8 @@ class Mesh(Generic[M]):
         )
 
         # Try using a cached element map.
-        if child in self._elmap:
-            return self._elmap[child]
+        if cref in self._elmap:
+            return self._elmap[cref]
 
         # Construct a list of midpoints.
         refdom = child_mesh.init_refdom()
@@ -130,11 +135,17 @@ class Mesh(Generic[M]):
         ).squeeze(-1)
 
         # Find parent elements
-        idx = self.mesh.element_finder()(*centroids)
+        cell_idx = numpy.empty(centroids.shape[1], dtype=int)
+        start_idx = 0
+        finder = self.mesh.element_finder()
+        for arr in numpy.array_split(centroids, math.ceil(centroids.shape[1] / 100), axis=1):
+            end_idx = start_idx + arr.shape[1]
+            cell_idx[start_idx:end_idx] = finder(*arr)
+            start_idx = end_idx
 
         # Cache result.
-        self._elmap[cref] = idx
-        return idx
+        self._elmap[cref] = cell_idx
+        return cell_idx
 
 
 class MeshDependent(Protocol[M]):
@@ -153,13 +164,13 @@ def common_mesh(mesh: Mesh[M] | MeshDependent[M],
     '''
     Find most refined mesh among members of a common refinement hierarchy.
     '''
-    parent = mesh if isinstance(mesh, Mesh) else mesh.mesh
+    common = mesh if isinstance(mesh, Mesh) else mesh.mesh
     for cand in other:
         if not isinstance(cand, Mesh):
             cand = cand.mesh
-        if not cand.is_child(parent):
-            parent = cand
-    return parent
+        if cand.is_refinement_of(common):
+            common = cand
+    return common
 
 
 class SimilaritySpace(pycoimset.typing.SimilaritySpace):
@@ -302,9 +313,8 @@ class BoolArrayClass(SimilarityClass):
 
             # Refine mesh
             end = min(end + 1, numpy.searchsorted(cum_meas,
-                                                  0.3 * cum_meas[-1],
-                                                  side='right'))
-            base_mesh = refined.mesh.mesh.refined(tind[:end])
+                                                  0.3 * cum_meas[-1]))
+            base_mesh = refined.mesh.mesh.refined(tind[:end + 1])
             mesh = Mesh(base_mesh, parent=self.mesh)
             refined = self.adapt(mesh)
 
@@ -334,7 +344,12 @@ class BoolArrayClass(SimilarityClass):
         -------
             This method may internally refine the mesh.
         '''
+        assert meas_low > 0
         assert meas_low < meas_high
+
+        # Log start of subset search.
+        logger.info(f'Starting subset search with measure <= {meas_high}, '
+                    f'>= {meas_low}')
 
         # Establish mapping to hint mesh.
         emap = self.mesh.element_map(hint.mesh)
@@ -354,7 +369,7 @@ class BoolArrayClass(SimilarityClass):
             # Find element indices and sort by element measure.
             tind = numpy.flatnonzero(refined.flag)
             tval = gval[tind]
-            meas = self.mesh.element_measure[tind]
+            meas = refined.mesh.element_measure[tind]
 
             sidx = numpy.argsort(tval)
             tind = tind[sidx]
@@ -366,6 +381,7 @@ class BoolArrayClass(SimilarityClass):
             cum_meas = numpy.cumsum(meas)
             end = int(numpy.searchsorted(cum_meas, meas_high, side='right'))
             cur_meas = 0.0 if end == 0 else cum_meas[end - 1]
+            assert cur_meas <= meas_high
 
             if cur_meas >= meas_low:
                 break
@@ -374,10 +390,12 @@ class BoolArrayClass(SimilarityClass):
             sidx = numpy.argsort(-meas)
             tind = tind[sidx]
             meas = meas[sidx]
-            end = numpy.searchsorted(cum_meas, 0.3 * cum_meas[-1],
-                                     side='right')
+            end = numpy.searchsorted(cum_meas, 0.3 * cum_meas[-1])
 
-            mesh = Mesh(refined.mesh.mesh.refined(tind[:end]),
+            logger.info(f'refining {end + 1}/{refined.mesh.mesh.nelements} '
+                        'elements')
+
+            mesh = Mesh(refined.mesh.mesh.refined(tind[:end + 1]),
                         parent=self.mesh)
             rmap = refined.mesh.element_map(mesh)
             rnum = numpy.bincount(rmap, minlength=refined.mesh.mesh.nelements)
@@ -388,7 +406,9 @@ class BoolArrayClass(SimilarityClass):
         # Return result.
         flag = numpy.zeros_like(refined.flag)
         flag[tind[:end]] = True
-        return BoolArrayClass(self.space, refined.mesh, flag)
+        out = BoolArrayClass(self.space, refined.mesh, flag)
+        logger.info(f'subset search finished with measure = {out.measure}')
+        return out
 
     def subset(self, meas_low: float, meas_high: float,
                hint: Optional[pycoimset.SignedMeasure[SimilaritySpace]] = None
@@ -400,9 +420,10 @@ class BoolArrayClass(SimilarityClass):
             hint = None
 
         # Call subroutine based on availability of hint.
-        if hint is None:
-            return self._subset_nohint(meas_low, meas_high)
-        return self._subset_hint(meas_low, meas_high, hint)
+        #if hint is None:
+        #    return self._subset_nohint(meas_low, meas_high)
+        #return self._subset_hint(meas_low, meas_high, hint)
+        return self._subset_nohint(meas_low, meas_high)
 
     def __invert__(self) -> Self:
         '''Complement of the similarity class.'''

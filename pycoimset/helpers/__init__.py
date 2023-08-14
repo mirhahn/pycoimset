@@ -2,9 +2,10 @@
 Useful helper classes for model construction.
 '''
 
-from .functionals import TransformedFunctional
+from .functionals import transform, with_safety_factor
 
 
 __all__ = [
-    'TransformedFunctional',
+    'transform',
+    'with_safety_factor'
 ]

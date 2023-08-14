@@ -9,15 +9,20 @@ import logging
 import resource
 import warnings
 
+from pycoimset import PenaltySolver
+from pycoimset.helpers import transform, with_safety_factor
 import skfem
 
 from functionals import MeasureFunctional, ObjectiveFunctional
-from space import SimilaritySpace, BoolArrayClass
+from space import BoolArrayClass, SimilaritySpace
 
-from pycoimset import BarrierSolver
-from pycoimset.helpers import TransformedFunctional
+# Set up logging.
+logging.basicConfig(format=logging.BASIC_FORMAT)
+logging.getLogger('pycoimset').setLevel(logging.INFO)
+logging.getLogger('skfem').setLevel(logging.ERROR)
+logging.getLogger('space').setLevel(logging.DEBUG)
 
-logging.disable(logging.WARNING)
+# Set resource limits and convert warnings to exceptions.
 resource.setrlimit(resource.RLIMIT_DATA, (2 * 2**30, 3 * 2**30))
 warnings.simplefilter('error')
 
@@ -27,19 +32,19 @@ assert isinstance(initial_mesh, skfem.MeshTri)
 space = SimilaritySpace(initial_mesh)
 ctrl = BoolArrayClass(space, space.mesh)
 
-sol_param = BarrierSolver.Parameters(
-    abstol=1e-3,
-    compltol=1e-4,
-    mu_init=1e-2,
-    thres_accept=0.05,
-    thres_reject=0.55,
-    margin_instat=0.5,
-    margin_proj_desc=0.5,
+sol_param = PenaltySolver.Parameters(
+    abstol=1e-5,
+    feas_tol=1e-3,
+    thres_accept=0.1,
+    thres_reject=0.3,
+    thres_tr_expand=0.7,
+    margin_instat=0.1,
+    margin_proj_desc=0.1,
     margin_step=0.25
 )
-solver = BarrierSolver(
-    TransformedFunctional(ObjectiveFunctional(space), scale=10000),
-    [MeasureFunctional(space) <= 0.1],
+solver = PenaltySolver(
+    with_safety_factor(ObjectiveFunctional(space), 2.0),
+    MeasureFunctional(space) <= 0.4,
     x0=ctrl,
     err_wgt=[1.0, 0.0],
     param=sol_param

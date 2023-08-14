@@ -140,7 +140,11 @@ class SteepestDescentStepFinder(UnconstrainedStepFinder[Spc]):
         # filler sets. We apportion the filler set to the components based on
         # the relative measures of the residual sets.
         if min_size > 0.0:
-            step = step | (ub - lb).subset(min_size, max_size, hint=grad)
+            fill = (ub - lb).subset(min_size, max_size, hint=grad)
+            oldstep = step
+            step = step | fill
+
+        assert step.measure > 0
 
         # Save the step and calculate the error bound.
         self._result = (step, (ub_lvl - lb_lvl) * radius + abs(lb_lvl)

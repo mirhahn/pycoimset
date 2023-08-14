@@ -79,6 +79,7 @@ def tracks_dependencies(cls: Type[T]) -> Type[T]:
             child, pred = cast(tuple[functools.cached_property, Optional[Callable[[Any], bool]]], stack.pop())
             if (
                 child.attrname is None or child.func.__name__ in visited
+                or child.attrname not in self.__dict__
                 or (pred is not None and not pred(self))
             ):
                 continue

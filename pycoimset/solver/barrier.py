@@ -6,17 +6,18 @@ from dataclasses import dataclass
 import dataclasses
 from enum import Enum
 from functools import cached_property
+import logging
 import math
 from typing import Generator, Generic, Optional, Sequence, TypeVar
 
 import numpy
 from numpy.typing import ArrayLike
 
-from ..unconstrained import SolverParameters as UnconstrainedParameters
-from ...step import SteepestDescentStepFinder
-from ...helpers import TransformedFunctional
-from ...logging import TabularLogger
-from ...typing import (
+from .unconstrained import SolverParameters as UnconstrainedParameters
+from ..step import SteepestDescentStepFinder
+from ..helpers import transform
+from ..logging import TabularLogger
+from ..typing import (
     Constraint,
     Functional,
     Operator,
@@ -25,7 +26,7 @@ from ...typing import (
     SimilaritySpace,
     UnconstrainedStepFinder,
 )
-from ...util import depends_on, notify_property_update, tracks_dependencies
+from ..util import depends_on, notify_property_update, tracks_dependencies
 
 
 __all__ = [
@@ -34,7 +35,11 @@ __all__ = [
     'BarrierSolver',
 ]
 
+# Module logger.
+logger = logging.getLogger('pycoimset.solver.barrier')
 
+
+# Type variable for similarity space type.
 Spc = TypeVar('Spc', bound=SimilaritySpace)
 
 
@@ -619,11 +624,11 @@ class BarrierSolver(Generic[Spc]):
                                  'constraints')
             if c.op is Operator.GREATER_THAN:
                 con_func.append(
-                    TransformedFunctional(c.func, shift=-c.shift)
+                    transform(c.func, shift=-c.shift)
                 )
             elif c.op is Operator.LESS_THAN:
                 con_func.append(
-                    TransformedFunctional(c.func, scale=-1, shift=c.shift)
+                    transform(c.func, scale=-1, shift=c.shift)
                 )
             else:
                 raise ValueError(f'unknown constraint operator {c.op}')
@@ -790,6 +795,7 @@ class BarrierSolver(Generic[Spc]):
             return
 
         # Update barrier parameter as needed.
+        mu_pre = self._sol.mu
         while True:
             # Calculate instationarity.
             while True:
@@ -813,6 +819,9 @@ class BarrierSolver(Generic[Spc]):
 
             # Decrease barrier parameter.
             self._sol.mu = self._sol.mu * self._par.mu_decay
+        if self._sol.mu != mu_pre:
+            logger.info(f'`mu` lowered to {self._sol.mu:0.3g}')
+        del mu_pre
 
         # Perform next step.
         accepted = False
@@ -848,7 +857,7 @@ class BarrierSolver(Generic[Spc]):
                 self._sol.eps
             )
             new_val, new_err = new_sol.f
-            if numpy.any(new_val[1:] - new_err[1:] < 0.0):
+            if numpy.any(new_val[1:] - new_err[1:] <= 0.0):
                 # Decrease trust region radius.
                 self._r /= 2
 
@@ -890,9 +899,11 @@ class BarrierSolver(Generic[Spc]):
                         self._sol.func.obj.input_space.measure,
                         2 * self._r
                     )
+                    logger.debug(f'TR radius increased to {self._r}')
             elif rho + rho_err < self._par.thres_reject:
                 # Decrease trust region radius.
                 self._r /= 2
+                logger.debug(f'rho = {rho}; TR radius decreased to {self._r}')
 
                 # Terminate if step is too small.
                 if self._r < 1000 * numpy.finfo(float).eps:

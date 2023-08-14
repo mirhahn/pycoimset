@@ -4,6 +4,7 @@ import json
 from typing import cast
 
 from pycoimset import UnconstrainedSolver
+from pycoimset.helpers import with_safety_factor
 from pycoimset.solver.unconstrained import SolverStats, SolverStatus
 
 import lotka_volterra.ext.scipy as scipy_ext
@@ -29,7 +30,7 @@ scipy_ext.register_extensions()
 
 # Define optimization problem
 space = IntervalSimilaritySpace((0.0, 12.0))
-objective = LotkaObjectiveFunctional(space)
+objective = with_safety_factor(LotkaObjectiveFunctional(space), 2.0)
 
 # Set up solver.
 solver = UnconstrainedSolver(objective)

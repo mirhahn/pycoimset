@@ -487,7 +487,7 @@ class Solver(Generic[Spc]):
         # Evaluate instationarity.
         while True:
             tau = self.solution.instationarity
-            obj_tol, grad_tol, step_tol = self._tolerances()
+            obj_tol, grad_tol, step_tol = self._tolerances(tau=tau)
             if tau.error <= self.param.margin_instat * max(
                 tau.value - self.param.abstol, self.param.abstol
             ):

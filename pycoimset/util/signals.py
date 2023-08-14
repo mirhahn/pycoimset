@@ -1,3 +1,4 @@
+import contextlib
 import signal
 
 
@@ -22,3 +23,23 @@ def setup_interrupt() -> None:
     def handler(*_):
         request_interrupt()
     signal.signal(signal.SIGINT | signal.SIGTERM, handler)
+
+
+@contextlib.contextmanager
+def delay_sigint():
+    '''Delay SIGINT until end of block.'''
+    # Set up dummy handler.
+    signal_received = None
+    def handler(*args):
+        signal_received = args
+
+    # Install dummy handler.
+    old_handler = signal.signal(signal.SIGINT, handler)
+
+    # Yield to code block.
+    yield
+
+    # Replace handler.
+    signal.signal(signal.SIGINT, old_handler)
+    if signal_received is not None:
+        signal.raise_signal(signal.SIGINT)
