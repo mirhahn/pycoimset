@@ -8,7 +8,7 @@ from enum import Enum
 from functools import cached_property
 import logging
 import math
-from typing import Any, Generic, Optional, Self, TypeVar, assert_never
+from typing import Any, Callable, Generic, Optional, Self, TypeVar, assert_never
 
 import numpy
 from numpy import dtype, float_
@@ -571,6 +571,7 @@ class PenaltySolver(Generic[Spc]):
     status: Status
     stats: Stats
     logger: TabularLogger
+    callback: Optional[Callable[[Self], None]]
 
     def __init__(self, obj: Functional[Spc], *con: Constraint[Spc],
                  x0: Optional[SimilarityClass[Spc]] = None,
@@ -579,6 +580,7 @@ class PenaltySolver(Generic[Spc]):
                  grad_err_wgt: Optional[ArrayLike] = None,
                  step: Optional[UnconstrainedStepFinder[Spc]] = None,
                  param: Optional[Parameters] = None,
+                 callback: Optional[Callable[[Self], None]] = None,
                  **kwargs):
         # Set up initial solution object.
         func = PenaltyFunctionals.from_problem(obj, *con)
@@ -610,6 +612,7 @@ class PenaltySolver(Generic[Spc]):
         self._c = 0.0
         self.status = type(self).Status.Running
         self.stats = type(self).Stats()
+        self.callback = callback
 
         # Set up logger.
         self.logger = TabularLogger(
@@ -775,6 +778,8 @@ class PenaltySolver(Generic[Spc]):
             con_tol = numpy.fmax(eps_con, numpy.abs(con - eps_con)) / 2
         else:
             con_tol = numpy.full(len(self._sol.func) - 1, numpy.inf)
+
+        logger.getChild('tolerances').debug(f'obj_tol = {obj_tol}, grad_tol = {grad_tol}, step_tol = {step_tol}, con_tol = {con_tol}')
 
         return obj_tol, grad_tol, step_tol, con_tol
 
@@ -966,6 +971,10 @@ class PenaltySolver(Generic[Spc]):
             penalty=self._sol.mu,
         )
 
+        # Invoke callback if necessary.
+        if self.callback is not None:
+            self.callback(self)
+
         self.status = type(self).Status.Running
         start_iter = self.stats.n_iter
         while (self.status.is_running and (
@@ -988,6 +997,10 @@ class PenaltySolver(Generic[Spc]):
                 step=self.stats.last_step,
                 rejected=self.stats.n_reject - old_reject
             )
+
+            # Invoke callback if necessary.
+            if self.callback is not None:
+                self.callback(self)
         
         # Set status if number of iterations was exceeded.
         if self.status is type(self).Status.Running:

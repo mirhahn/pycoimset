@@ -33,6 +33,11 @@ class ProxyBase(Functional[Spc], Generic[Spc]):
         obj = super().__new__(cls)
         obj._func = func
         return obj
+    
+    @property
+    def base_functional(self) -> Functional[Spc]:
+        '''Underlying functional.'''
+        return self._func
 
     @property
     def input_space(self) -> Spc:
