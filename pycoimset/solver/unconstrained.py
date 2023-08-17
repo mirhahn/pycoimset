@@ -19,7 +19,7 @@ Implementations of the basic unconstrained optimization loop.
 from dataclasses import dataclass
 from enum import IntEnum
 import math
-from typing import Generic, NamedTuple, Optional, TypeVar
+from typing import Callable, Generic, NamedTuple, Optional, Self, TypeVar
 
 import numpy
 
@@ -67,7 +67,7 @@ class SolverParameters(JSONSerializable):
     thres_reject: float = 0.4
 
     #: Trust region enlargement threshold. Must be strictly between
-    #: `thres_reject` and 1.
+    #: `thres_accept` and 1.
     thres_tr_expand: float = 0.6
 
     #: Error tuning parameter. Regulates the ratio between a step's
@@ -326,6 +326,9 @@ class Solver(Generic[Spc]):
     #: Estimate of objective curvature.
     curvature: float
 
+    #: Callback.
+    callback: Optional[Callable[[Self], None]]
+
     #: Logger for tabular output.
     logger: TabularLogger
 
@@ -333,6 +336,7 @@ class Solver(Generic[Spc]):
                  step_finder: Optional[UnconstrainedStepFinder[Spc]] = None,
                  initial_sol: Optional[SimilarityClass[Spc]] = None,
                  param: Optional[SolverParameters] = None,
+                 callback: Optional[Callable[[Self], None]] = None,
                  **kwargs):
         # Retain reference to objective.
         self.objective = obj_func
@@ -363,6 +367,9 @@ class Solver(Generic[Spc]):
 
         # Sanitize parameters.
         self.param.sanitize()
+
+        # Set up callback.
+        self.callback = callback
 
         # Set up logger.
         self.logger = TabularLogger(
@@ -487,7 +494,7 @@ class Solver(Generic[Spc]):
         # Evaluate instationarity.
         while True:
             tau = self.solution.instationarity
-            obj_tol, grad_tol, step_tol = self._tolerances(tau=tau)
+            obj_tol, grad_tol, step_tol = self._tolerances(tau=tau.value)
             if tau.error <= self.param.margin_instat * max(
                 tau.value - self.param.abstol, self.param.abstol
             ):
@@ -574,6 +581,8 @@ class Solver(Generic[Spc]):
             obj=self.solution.val.value,
             instat=self.solution.instationarity.value
         )
+        if self.callback is not None:
+            self.callback(self)
 
         old_iter = self.stats.n_iter
         max_iter = self.param.max_iter
@@ -589,6 +598,8 @@ class Solver(Generic[Spc]):
                 step=self.stats.last_step,
                 tr_fail=self.stats.n_reject - old_reject
             )
+            if self.callback is not None:
+                self.callback(self)
 
         if self.status.is_running:
             self.status = SolverStatus.ERROR_MAX_ITER

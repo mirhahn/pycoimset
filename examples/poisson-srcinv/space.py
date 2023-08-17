@@ -8,7 +8,8 @@ from types import NotImplementedType
 from typing import Generic, Optional, Protocol, Self, TypeVar, cast
 
 import numpy
-from numpy.typing import ArrayLike
+from numpy import float_
+from numpy.typing import ArrayLike, NDArray
 import pycoimset.typing
 import pycoimset.util.weakref as weakref
 import skfem
@@ -27,7 +28,29 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-M = TypeVar('M', bound=skfem.MeshTri)
+M = TypeVar('M', bound=skfem.MeshTri1)
+
+
+def solve_subset_sum(weight: NDArray[float_], bnd: float, eps: float) -> NDArray[float_]:
+    '''
+    Approximately solve subset sum problem using dynamic programming.
+    '''
+    assert eps > 0
+
+    eps = min(eps, float(numpy.min(weight[weight > 0])))
+
+    l: list[tuple[float, list[int]]] = [(0, [])]
+    for i, w in enumerate(weight):
+        u = sorted(l + [(y + w, p + [i]) for y, p in l], key=(lambda el: el[0]))    # type: ignore
+        y, p = u[0]
+        l = [(y, p)]
+        for z, p in u[1:]:
+            if y + eps * bnd / len(weight) < z and z <= bnd:
+                l.append((z, p))
+                y = z
+    l = sorted(l, key=lambda el: el[0])
+    _, p = l[-1]
+    return numpy.array(p, dtype=int)
 
 
 class Mesh(Generic[M]):
@@ -126,7 +149,7 @@ class Mesh(Generic[M]):
 
         # Try using a cached element map.
         if cref in self._elmap:
-            return self._elmap[cref]
+            return self._elmap[cref]    # type: ignore
 
         # Construct a list of midpoints.
         refdom = child_mesh.init_refdom()
@@ -294,34 +317,34 @@ class BoolArrayClass(SimilarityClass):
         refined = self
 
         while True:
-            # Find element indices and sort by element measure.
+            # Find element indices and element measures.
             tind = numpy.flatnonzero(refined.flag)
             meas = refined.mesh.element_measure[tind]
+            min_meas = cast(float, numpy.min(meas))
 
-            sidx = numpy.argsort(-meas)
-            tind = tind[sidx]
-            meas = meas[sidx]
-            del sidx
+            # Approximately solve subset sum problem.
+            flag = solve_subset_sum(meas, meas_high,
+                                    min((meas_high - meas_low) / 2,
+                                        min_meas) / 2)
+            cum_meas = cast(float, numpy.sum(meas[flag]))
 
-            # Search for break point in cumulative measure array.
-            cum_meas = numpy.cumsum(meas)
-            end = int(numpy.searchsorted(cum_meas, meas_high, side='right'))
-            cur_meas = 0.0 if end == 0 else cum_meas[end - 1]
-
-            if cur_meas >= meas_low:
+            if cum_meas >= meas_low:
                 break
 
+            # Sort elements by size for refinement.
+            idx_sort = numpy.flip(numpy.argsort(meas))
+            end = math.floor(len(idx_sort) / 3) + 1
+            tind = tind[idx_sort[:end]]
+
             # Refine mesh
-            end = min(end + 1, numpy.searchsorted(cum_meas,
-                                                  0.3 * cum_meas[-1]))
-            base_mesh = refined.mesh.mesh.refined(tind[:end + 1])
+            base_mesh = refined.mesh.mesh.refined(tind)
             mesh = Mesh(base_mesh, parent=self.mesh)
             refined = self.adapt(mesh)
 
         # Return result.
-        flag = numpy.zeros_like(refined.flag)
-        flag[tind[:end]] = True
-        return BoolArrayClass(self.space, refined.mesh, flag)
+        set_flag = numpy.zeros_like(refined.flag)
+        set_flag[tind[flag]] = True
+        return BoolArrayClass(self.space, refined.mesh, set_flag)
 
     def _subset_hint(self, meas_low: float, meas_high: float,
                      hint: 'SignedMeasure') -> 'BoolArrayClass':

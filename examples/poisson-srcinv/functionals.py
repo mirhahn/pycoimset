@@ -168,6 +168,6 @@ class ObjectiveFunctional(pycoimset.Functional[SimilaritySpace]):
         numpy.add.at(coarse_dof, elmap, fine_dof)
         del elmap, fine_dof
 
-        coarse_dof = (1 - 2 * arg.flag) * coarse_dof / arg.mesh.element_measure
+        coarse_dof = -(2 * arg.flag - 1) * coarse_dof / arg.mesh.element_measure
         grad = SignedMeasure(self.input_space, arg.mesh, coarse_dof)
         return grad, eval.graderr.sum()

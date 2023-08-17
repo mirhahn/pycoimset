@@ -328,7 +328,6 @@ class PoissonEvaluator:
 
         return eta_int - eta_bnd
 
-
     @depends_on(mesh, pdesol, qpdesol)
     @cached_property
     def graderr(self) -> numpy.ndarray:

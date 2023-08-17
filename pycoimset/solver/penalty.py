@@ -8,11 +8,11 @@ from enum import Enum
 from functools import cached_property
 import logging
 import math
-from typing import Any, Callable, Generic, Optional, Self, TypeVar, assert_never
+from typing import Any, Callable, Generic, Optional, Self, TypeVar, assert_never, cast
 
 import numpy
 from numpy import dtype, float_
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, NDArray
 
 from .unconstrained import SolverParameters
 from ..logging import TabularLogger
@@ -40,6 +40,20 @@ Spc = TypeVar('Spc', bound=SimilaritySpace)
 
 # Logger for debugging.
 logger = logging.getLogger(__name__)
+
+
+# Formatting for NumPy arrays.
+def ndarray_debug_format(a: NDArray):
+    return numpy.array2string(
+        a,
+        precision=3,
+        suppress_small=False,
+        formatter={
+            'float_kind': lambda x: numpy.format_float_scientific(
+                x, precision=3
+            )
+        }
+    )
 
 
 @dataclass
@@ -159,9 +173,9 @@ class PenaltySolution(Generic[Spc]):
     _mu: float
     _vt: float
     _gt: float
-    _ct: numpy.ndarray[Any, numpy.dtype[numpy.float_]]
-    _ve: numpy.ndarray[Any, numpy.dtype[numpy.float_]]
-    _ge: numpy.ndarray[Any, numpy.dtype[numpy.float_]]
+    _ct: NDArray[float_]
+    _ve: NDArray[float_]
+    _ge: NDArray[float_]
 
     def __init__(self, func: PenaltyFunctionals,
                  mu: Optional[float] = None,
@@ -273,12 +287,12 @@ class PenaltySolution(Generic[Spc]):
         notify_property_update(self, 'mu')
 
     @property
-    def val_wgt(self) -> numpy.ndarray:
+    def val_wgt(self) -> NDArray[float_]:
         '''Value error weights.'''
         return self._ve
 
     @property
-    def grad_wgt(self) -> numpy.ndarray:
+    def grad_wgt(self) -> NDArray[float_]:
         '''Gradient error weights.'''
         return self._ge
 
@@ -303,13 +317,16 @@ class PenaltySolution(Generic[Spc]):
         notify_property_update(self, 'grad_tol')
 
     @property
-    def con_tol(self) -> numpy.ndarray:
+    def con_tol(self) -> NDArray[float_]:
         '''Constraint value tolerance.'''
         return self._ct
 
     @con_tol.setter
     def con_tol(self, tol: ArrayLike) -> None:
-        self._ct = numpy.broadcast_to(tol, len(self._F) - 1)
+        tol = numpy.asarray(tol, dtype=float_)
+        self._ct = cast(
+            NDArray[float_], numpy.broadcast_to(tol, len(self._F) - 1)
+        )
         notify_property_update(self, 'con_tol')
 
     @depends_on(
@@ -318,7 +335,7 @@ class PenaltySolution(Generic[Spc]):
         (con_tol, lambda s: s.is_cache_invalid(type(s).val_err_tuple))
     )
     @cached_property
-    def val_err_tuple(self) -> tuple[numpy.ndarray, numpy.ndarray]:
+    def val_err_tuple(self) -> tuple[NDArray[float_], NDArray[float_]]:
         '''Value-error tuple.'''
         val_tol = self._F.errtol(self.val_tol, self.mu / 2, con_max=self._ct,
                                  wgt=self._ve)
@@ -388,7 +405,7 @@ class PenaltySolution(Generic[Spc]):
     )
     @cached_property
     def grad_err_tuple(self) -> tuple[Sequence[SignedMeasure[Spc]],
-                                      numpy.ndarray]:
+                                      NDArray[float_]]:
         '''Gradient-error tuple.'''
         # Get value-error tuple and calculate upper absolute value bound.
         val, verr = self.val_err_tuple
@@ -779,7 +796,18 @@ class PenaltySolver(Generic[Spc]):
         else:
             con_tol = numpy.full(len(self._sol.func) - 1, numpy.inf)
 
-        logger.getChild('tolerances').debug(f'obj_tol = {obj_tol}, grad_tol = {grad_tol}, step_tol = {step_tol}, con_tol = {con_tol}')
+        # Log tolerances (debugging).
+        for name, val in (('obj_tol', obj_tol),
+                          ('grad_tol', grad_tol),
+                          ('step_tol', step_tol),
+                          ('con_tol', con_tol)):
+            if isinstance(val, float):
+                logger.getChild('tolerances').debug(f'{name} = {val:.3e}')
+            elif isinstance(val, numpy.ndarray):
+                val = numpy.array2string(val, precision=3, floatmode='fixed')
+                logger.getChild('tolerances').debug(f'{name} = {val}')
+            else:
+                assert_never(val)
 
         return obj_tol, grad_tol, step_tol, con_tol
 
@@ -842,12 +870,7 @@ class PenaltySolver(Generic[Spc]):
                 self.status = type(self).Status.Solved
                 return
             
-            # Check for feasibility restoration.
-            if tau > self._par.abstol:
-                break
-
-            # Set penalty parameter.
-            self._sol.mu = max(1.0, 2 * self._sol.mu)
+            break
         
         accepted = False
         comp_proj_chg = None
@@ -862,10 +885,19 @@ class PenaltySolver(Generic[Spc]):
             # Calculate projected change on a per-functional basis.
             comp_val, _ = self._sol.val_err_tuple
             comp_grad, _ = self._sol.grad_err_tuple
-            comp_proj_chg = numpy.array([g(step) for g in comp_grad], dtype=float)
+            comp_proj_chg = numpy.array([g(step) for g in comp_grad], dtype=float_)
+            logger.getChild('step').debug(f'mu = {self._sol.mu}')
+            logger.getChild('step').debug(
+                'comp_val = '
+                f'{ndarray_debug_format(comp_val)}'
+            )
+            logger.getChild('step').debug(
+                'comp_proj_chg = '
+                f'{ndarray_debug_format(comp_proj_chg)}'
+            )
 
             # Aggregate full projected change.
-            proj_chg = comp_proj_chg[0] + self._sol.mu * sum(comp_val[1:] * comp_proj_chg[1:])
+            proj_chg = grad(step)
             proj_chg_error = self._sol.func.grad_tol_type.estimated_error(
                 step.measure, grad_err
             )
@@ -879,31 +911,8 @@ class PenaltySolver(Generic[Spc]):
                 self._sol.con_tol = con_tol
                 continue
 
-            # Check if any error functionals that are violated are
-            # projected to deteriorate further. If so, adjust penalty
-            # parameter.
-            con_flg = ((abs(comp_val[1:]) > self._par.feas_tol)
-                       & ((comp_proj_chg[1:] * comp_val[1:] > 0.0)
-                          | numpy.isclose(proj_chg, 0.0).item()))
-            if numpy.any(con_flg):
-                # Estimate required increase in penalty parameter.
-                cval = comp_val[1:][con_flg]
-                cprj = comp_proj_chg[1:][con_flg]
-                mu_incr = -proj_chg / (cval * cprj)
-                self._sol.mu = self._sol.mu + max(2 * numpy.max(mu_incr), 0.0)
-
-                # Recalculate error tolerances and reset.
-                obj_tol, grad_tol, step_tol, con_tol = self._tolerances(
-                    tau=tau,
-                    con=comp_val[1:]
-                )
-                self._sol.val_tol = obj_tol
-                self._sol.grad_tol = grad_tol
-                self._sol.con_tol = con_tol
-                continue
-
             # Calculate step quality.
-            new_sol = PenaltySolution(
+            new_sol = PenaltySolution[Spc](
                 self._sol.func,
                 self._sol.mu,
                 self._sol.x ^ step,
@@ -918,8 +927,16 @@ class PenaltySolver(Generic[Spc]):
             step_quality = (new_pen - pen) / proj_chg
             step_quality_err = (pen_err + new_pen_err) / abs(proj_chg)
 
+            # Log actual component change.
+            comp_chg = new_sol.val_err_tuple[0] - self._sol.val_err_tuple[0]
+            logger.getChild('step').debug(f'comp_chg = {ndarray_debug_format(comp_chg)}')
+
             # Update curvature estimate.
             self._update_curvature(step.measure, proj_chg, new_pen - pen)
+
+            # Update penalty parameter if necessary.
+            viol_old = numpy.sum(self._sol.val_err_tuple[0][1:])
+            viol_chg = numpy.sum(new_sol.val_err_tuple[0][1:] - self._sol.val_err_tuple[0][1:])
 
             # Decide whether or not to accept.
             if step_quality - step_quality_err >= self._par.thres_accept:
@@ -934,11 +951,18 @@ class PenaltySolver(Generic[Spc]):
                 if step_quality >= self._par.thres_tr_expand:
                     self._r = min(self.space.measure, 2 * self._r)
 
+                # Update penalty parameter if necessary.
+                if viol_chg > 0 and viol_old > 0:
+                    self._sol.mu = 2 * self._sol.mu
+                    self._c = 0.0
+
                 accepted = True
             elif step_quality + step_quality_err < self._par.thres_reject:
                 # Log decision.
-                logger.debug('rejected step with rho '
-                             f'<= {step_quality + step_quality_err}')
+                logger.getChild('step').debug(
+                    'rejected step with rho <= '
+                    f'{step_quality + step_quality_err:.3f}'
+                )
 
                 # Decrease trust region radius.
                 self._r /= 2

@@ -3,7 +3,11 @@ Helpers used to modify functionals.
 '''
 
 import math
-from typing import Generic, Optional, TypeVar
+from typing import Generic, Optional, Sequence, TypeVar
+
+import numpy
+from numpy import float_
+from numpy.typing import NDArray, ArrayLike
 
 from ..typing import (
     ErrorNorm,
@@ -210,3 +214,120 @@ class with_safety_factor(ProxyBase[Spc], Generic[Spc]):
     def get_gradient(self) -> tuple[SignedMeasure[Spc], float]:
         grad, err = self._func.get_gradient()
         return grad, err * self._gfac
+    
+
+class weighted_sum(Functional[Spc], Generic[Spc]):
+    '''
+    Weighted sum of several functionals.
+    '''
+    _spc: Spc
+    _gtype: ErrorNorm
+    _c: NDArray[float_]
+    _f: Sequence[Functional[Spc]]
+    _vwgt: NDArray[float_]
+    _gwgt: NDArray[float_]
+    _vtol: float
+    _gtol: float
+
+    def __init__(self, func: Sequence[Functional[Spc]], coef: ArrayLike = 1.0,
+                 val_wgt: ArrayLike = 1.0, grad_wgt: ArrayLike = 1.0):
+        if len(func) == 0:
+            raise ValueError('must provide at least one component functional')
+        self._spc = func[0].input_space
+        self._gtype = func[0].grad_tol_type
+        for f in func[1:]:
+            if f.input_space is not self._spc:
+                raise ValueError('all components must use the same input space')
+            if f.grad_tol_type is not self._gtype:
+                raise ValueError('all components must have the same error control type')
+        self._f = func
+        self._c = numpy.broadcast_to(numpy.asarray(coef, dtype=float_),
+                                     len(func))
+        self._vwgt = numpy.broadcast_to(numpy.asarray(val_wgt, dtype=float_),
+                                        len(func))
+        self._gwgt = numpy.broadcast_to(numpy.asarray(grad_wgt, dtype=float_),
+                                        len(func))
+        self._vtol = math.inf
+        self._gtol = math.inf
+
+    def __len__(self) -> int:
+        '''Number of components.'''
+        return len(self._f)
+    
+    def __getitem__(self, idx: int) -> Functional[Spc]:
+        '''Component functional.'''
+        return self._f[idx]
+
+    @property
+    def input_space(self) -> Spc:
+        '''Input space.'''
+        return self._spc
+    
+    @property
+    def arg(self) -> Optional[SimilarityClass[Spc]]:
+        '''Current argument.'''
+        return self._f[0].arg
+    
+    @arg.setter
+    def arg(self, x: Optional[SimilarityClass[Spc]]) -> None:
+        for f in self._f:
+            if f.arg is not x:
+                f.arg = x
+
+    @property
+    def val_tol(self) -> float:
+        '''Value tolerance.'''
+        return self._vtol
+    
+    @val_tol.setter
+    def val_tol(self, tol: float) -> None:
+        self._vtol = tol
+        if not numpy.isfinite(tol):
+            tol_comp = numpy.full(len(self._f), numpy.inf)
+        else:
+            wgt = abs(self._c * self._vwgt)
+            tol_comp = tol * (wgt / numpy.sum(wgt))
+        for f, vt in zip(self._f, tol_comp):
+            f.val_tol = vt
+
+    @property
+    def grad_tol(self) -> float:
+        '''Gradient tolerance.'''
+        return self._gtol
+    
+    @grad_tol.setter
+    def grad_tol(self, tol: float) -> None:
+        self._gtol = tol
+        if not numpy.isfinite(tol):
+            tol_comp = numpy.full(len(self._f), numpy.inf)
+        else:
+            wgt = abs(self._c * self._gwgt)
+            tol_comp = tol * (wgt / numpy.sum(wgt))
+        for f, gt in zip(self._f, tol_comp):
+            f.grad_tol = gt
+
+    @property
+    def grad_tol_type(self) -> ErrorNorm:
+        '''Type of error control.'''
+        return self._gtype
+    
+    def get_value(self) -> tuple[float, float]:
+        '''Return value-error pair.'''
+        val = numpy.empty(len(self._f), dtype=float_)
+        err = numpy.empty(len(self._f), dtype=float_)
+        for i, f in enumerate(self._f):
+            val[i], err[i] = f.get_value()
+        return numpy.inner(self._c, val), numpy.inner(numpy.abs(self._c), err)
+    
+    def get_gradient(self) -> tuple[SignedMeasure[Spc], float]:
+        '''Return gradient-error pair.'''
+        grad = None
+        err = numpy.empty(len(self._f), dtype=float_)
+        for i, (c, f) in enumerate(zip(self._c, self._f)):
+            g, err[i] = f.get_gradient()
+            if grad is None:
+                grad = c * g
+            else:
+                grad = grad + c * g
+        assert grad is not None
+        return grad, numpy.inner(numpy.abs(self._c), err)

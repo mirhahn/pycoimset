@@ -11,11 +11,13 @@ import warnings
 
 import meshio
 import numpy
-from pycoimset import PenaltySolver
-from pycoimset.helpers import transform, with_safety_factor
+from pycoimset import PenaltySolver, UnconstrainedSolver
+from pycoimset.helpers import with_safety_factor
 import skfem
 
 from functionals import MeasureFunctional, ObjectiveFunctional
+from pycoimset.helpers.functionals import weighted_sum
+from pycoimset.solver.unconstrained import SolverParameters
 from space import BoolArrayClass, SimilaritySpace
 
 
@@ -40,8 +42,6 @@ class Callback:
         if not isinstance(obj_func, ObjectiveFunctional):
             return
         
-        if obj_func.arg is sol:
-            obj_func.arg = sol
         obj_func.get_value()
         obj_func.get_gradient()
         eval = obj_func.evaluator
@@ -85,21 +85,48 @@ assert isinstance(initial_mesh, skfem.MeshTri)
 space = SimilaritySpace(initial_mesh)
 ctrl = BoolArrayClass(space, space.mesh)
 
+#sol_param = SolverParameters(
+#    abstol=1e-5,
+#    thres_accept=0.1,
+#    thres_reject=0.6,
+#    thres_tr_expand=0.9,
+#    margin_instat=0.5,
+#    margin_proj_desc=0.5,
+#    margin_step=0.5,
+#    tr_radius=0.01
+#)
+#solver = UnconstrainedSolver(
+#    weighted_sum(
+#        [
+#            with_safety_factor(ObjectiveFunctional(space), 2.0),
+#            MeasureFunctional(space)
+#        ],
+#        [1.0, 8.75e-5],
+#        [1.0, 0.0],
+#        [1.0, 0.0]
+#    ),
+#    initial_sol=ctrl,
+#    callback=Callback(),
+#    param=sol_param
+#)
+#solver.solve()
+
 sol_param = PenaltySolver.Parameters(
     abstol=1e-5,
-    feas_tol=1e-3,
+    feas_tol=1e-5,
     thres_accept=0.1,
-    thres_reject=0.5,
-    thres_tr_expand=0.7,
-    margin_instat=0.5,
-    margin_proj_desc=0.2,
-    margin_step=0.1,
-    tr_radius=0.005
+    thres_reject=0.2,
+    thres_tr_expand=0.5,
+    margin_instat=1e-3,
+    margin_proj_desc=1e-3,
+    margin_step=1e-3,
+    tr_radius=0.01
 )
 solver = PenaltySolver(
     with_safety_factor(ObjectiveFunctional(space), 2.0),
     MeasureFunctional(space) <= 0.4,
     x0=ctrl,
+    mu=1e-5,
     err_wgt=[1.0, 0.0],
     param=sol_param,
     callback=Callback()
