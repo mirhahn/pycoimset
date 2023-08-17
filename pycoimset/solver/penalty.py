@@ -8,6 +8,7 @@ from enum import Enum
 from functools import cached_property
 import logging
 import math
+import time
 from typing import Any, Callable, Generic, Optional, Self, TypeVar, assert_never, cast
 
 import numpy
@@ -633,8 +634,9 @@ class PenaltySolver(Generic[Spc]):
 
         # Set up logger.
         self.logger = TabularLogger(
-            ['iter', 'objval', 'instat', 'infeas', 'penalty', 'step', 'rejected'],
+            ['time', 'iter', 'objval', 'instat', 'infeas', 'penalty', 'step', 'rejected'],
             format={
+                'time': '8.2f',
                 'iter': '4d',
                 'objval': '13.6e',
                 'instat': '13.6e',
@@ -644,6 +646,7 @@ class PenaltySolver(Generic[Spc]):
                 'rejected': '4d'
             },
             width={
+                'time': 8,
                 'iter': 4,
                 'objval': 13,
                 'instat': 13,
@@ -986,8 +989,12 @@ class PenaltySolver(Generic[Spc]):
 
     def solve(self) -> None:
         '''Run main loop until termination.'''
+        # Record start time.
+        start_time = time.perf_counter()
+
         # Output initial iterate.
         self.logger.push_line(
+            time=time.perf_counter() - start_time,
             iter=self.stats.n_iter,
             objval=self._sol.obj_val[0],
             instat=self._sol.tau[0],
@@ -1013,6 +1020,7 @@ class PenaltySolver(Generic[Spc]):
 
             # Output log line.
             self.logger.push_line(
+                time=time.perf_counter() - start_time,
                 iter=self.stats.n_iter,
                 objval=self._sol.obj_val[0],
                 instat=self._sol.tau[0],

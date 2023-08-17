@@ -5,8 +5,11 @@ Solver for the "Topology optimisation of heat conduction problems
 governed by the Poisson equation" example of the 
 '''
 
+import json
 import logging
 import resource
+import sys
+from typing import cast
 import warnings
 
 import meshio
@@ -69,16 +72,42 @@ class Callback:
 
 
 # Set up logging.
-logging.basicConfig(format=logging.BASIC_FORMAT)
+logging.basicConfig(format=logging.BASIC_FORMAT, stream=sys.stdout)
 logging.getLogger('pycoimset').setLevel(logging.INFO)
 logging.getLogger('skfem').setLevel(logging.ERROR)
 logging.getLogger('space').setLevel(logging.DEBUG)
+logging.getLogger('pde.evaluator').setLevel(logging.DEBUG)
 
 # Set resource limits and convert warnings to exceptions.
 #resource.setrlimit(resource.RLIMIT_DATA, (2 * 2**30, 3 * 2**30))
 warnings.simplefilter('error')
 
-initial_mesh = skfem.MeshTri().refined(6)
+# NOTE: Would terminate with abstol=1e-4 and safety factor 0.05 after 51 iterations
+sol_param = PenaltySolver.Parameters(
+    abstol=1e-4,
+    feas_tol=0.01,
+    thres_accept=1e-5,
+    thres_reject=0.7,
+    thres_tr_expand=0.9,
+    margin_instat=0.99,
+    margin_proj_desc=0.99,
+    margin_step=1e-3,
+    tr_radius=0.01
+)
+prob_param = {
+    'safety_factor': 0.05,
+    'measure_bound': 0.5,
+    'mu_init': 0.01,
+    'initial_resolution': 6
+}
+
+with open('parameters.json', 'w') as f:
+    json.dump({
+        'problem': prob_param,
+        'solver': sol_param.toJSON()
+    }, f, indent=4)
+
+initial_mesh = skfem.MeshTri().refined(prob_param.get('initial_resolution', 6))
 assert isinstance(initial_mesh, skfem.MeshTri)
 
 space = SimilaritySpace(initial_mesh)
@@ -110,23 +139,12 @@ ctrl = BoolArrayClass(space, space.mesh)
 #)
 #solver.solve()
 
-# NOTE: Would terminate with abstol=1e-4 after 51 iterations
-sol_param = PenaltySolver.Parameters(
-    abstol=1e-4,
-    feas_tol=0.01,
-    thres_accept=1e-5,
-    thres_reject=0.7,
-    thres_tr_expand=0.9,
-    margin_instat=0.99,
-    margin_proj_desc=0.99,
-    margin_step=0.01,
-    tr_radius=0.01
-)
 solver = PenaltySolver(
-    with_safety_factor(ObjectiveFunctional(space), 0.05),
-    MeasureFunctional(space) <= 0.4,
+    with_safety_factor(ObjectiveFunctional(space),
+                       prob_param['safety_factor']),
+    MeasureFunctional(space) <= prob_param['measure_bound'],
     x0=ctrl,
-    mu=0.01,
+    mu=prob_param['mu_init'],
     err_wgt=[1.0, 0.0],
     param=sol_param,
     callback=Callback()

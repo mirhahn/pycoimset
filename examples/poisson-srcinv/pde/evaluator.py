@@ -4,6 +4,7 @@ Evaluator for the Poisson problem.
 
 from dataclasses import dataclass, field
 from functools import cached_property
+import logging
 import math
 import time
 from typing import NamedTuple, Optional, cast
@@ -20,6 +21,9 @@ import skfem.utils
 from pycoimset.util import depends_on, notify_property_update, tracks_dependencies
 
 from .forms import L, a, a_w, e_fac, e_int, ge_int
+
+
+logger = logging.getLogger(__name__)
 
 
 def refine_mesh(mesh: skfem.MeshTri, wgt: NDArray[float_], tol: float, max_frac: Optional[float] = None) -> skfem.MeshTri:
@@ -380,7 +384,8 @@ class PoissonEvaluator:
         '''
         while ((err := abs(numpy.sum((eta := self.objerr)).item()))
                > self._tol.obj):
-            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.obj, max_frac=0.01)
+            logger.debug(f'object error {err} exceeds tolerance {self._tol.obj}')
+            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.obj, max_frac=0.005)
         return err
 
     def eval_grad(self) -> float:
@@ -389,6 +394,6 @@ class PoissonEvaluator:
         '''
         while ((err := numpy.sum((eta := self.graderr)).item())
                > self._tol.grad):
-            print(err)
-            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.grad, max_frac=0.01)
+            logger.debug(f'gradient error {err} exceeds tolerance {self._tol.grad}')
+            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.grad, max_frac=0.005)
         return err
