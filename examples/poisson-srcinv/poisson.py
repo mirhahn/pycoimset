@@ -112,7 +112,7 @@ ctrl = BoolArrayClass(space, space.mesh)
 
 # NOTE: Would terminate with abstol=1e-4 after 51 iterations
 sol_param = PenaltySolver.Parameters(
-    abstol=1e-5,
+    abstol=1e-4,
     feas_tol=0.01,
     thres_accept=1e-5,
     thres_reject=0.7,

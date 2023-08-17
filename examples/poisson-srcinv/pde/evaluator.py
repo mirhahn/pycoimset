@@ -22,8 +22,8 @@ from pycoimset.util import depends_on, notify_property_update, tracks_dependenci
 from .forms import L, a, a_w, e_fac, e_int, ge_int
 
 
-def refine_mesh(mesh: skfem.MeshTri, wgt: NDArray[float_], tol: float, vol: Optional[NDArray[float_]] = None, max_frac: Optional[float] = None) -> skfem.MeshTri:
-    sort_idx = numpy.argsort(wgt) if vol is None else numpy.argsort(wgt / vol)
+def refine_mesh(mesh: skfem.MeshTri, wgt: NDArray[float_], tol: float, max_frac: Optional[float] = None) -> skfem.MeshTri:
+    sort_idx = numpy.argsort(wgt)
     sorted_wgt = wgt[sort_idx]
     split_idx = numpy.searchsorted(sorted_wgt, tol / len(sorted_wgt), side='right')
     if max_frac is not None:
@@ -380,7 +380,7 @@ class PoissonEvaluator:
         '''
         while ((err := abs(numpy.sum((eta := self.objerr)).item()))
                > self._tol.obj):
-            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.obj, 0.01)
+            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.obj, max_frac=0.01)
         return err
 
     def eval_grad(self) -> float:
@@ -390,5 +390,5 @@ class PoissonEvaluator:
         while ((err := numpy.sum((eta := self.graderr)).item())
                > self._tol.grad):
             print(err)
-            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.grad, 0.01)
+            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.grad, max_frac=0.01)
         return err
