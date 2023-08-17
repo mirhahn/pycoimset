@@ -854,23 +854,22 @@ class PenaltySolver(Generic[Spc]):
                 con=val[1:]
             )
             if (
-                tau_err > self._par.margin_instat * max(
+                tau_err <= self._par.margin_instat * max(
                     tau - self._par.abstol, self._par.abstol
                 )
-                or numpy.any(val_err[1:] > con_tol)
+                and numpy.all(val_err[1:] <= con_tol)
             ):
-                self._sol.val_tol = obj_tol
-                self._sol.grad_tol = grad_tol
-                self._sol.con_tol = con_tol
-                continue
+                break
+        
+            self._sol.val_tol = obj_tol
+            self._sol.grad_tol = grad_tol
+            self._sol.con_tol = con_tol
 
-            # Check termination criterion.
-            if (tau <= self._par.abstol
-                and numpy.all(val[1:] <= self._par.feas_tol)):
-                self.status = type(self).Status.Solved
-                return
-            
-            break
+        # Check termination criterion.
+        if (tau <= self._par.abstol
+            and numpy.all(val[1:] <= self._par.feas_tol)):
+            self.status = type(self).Status.Solved
+            return
         
         accepted = False
         comp_proj_chg = None
@@ -935,7 +934,7 @@ class PenaltySolver(Generic[Spc]):
             self._update_curvature(step.measure, proj_chg, new_pen - pen)
 
             # Update penalty parameter if necessary.
-            viol_old = numpy.sum(self._sol.val_err_tuple[0][1:])
+            viol_old = self._sol.val_err_tuple[0][1:]
             viol_chg = numpy.sum(new_sol.val_err_tuple[0][1:] - self._sol.val_err_tuple[0][1:])
 
             # Decide whether or not to accept.
@@ -952,7 +951,7 @@ class PenaltySolver(Generic[Spc]):
                     self._r = min(self.space.measure, 2 * self._r)
 
                 # Update penalty parameter if necessary.
-                if viol_chg > 0 and viol_old > 0:
+                if viol_chg > 0 and numpy.any(viol_old > self._par.feas_tol):
                     self._sol.mu = 2 * self._sol.mu
                     self._c = 0.0
 
@@ -964,8 +963,9 @@ class PenaltySolver(Generic[Spc]):
                     f'{step_quality + step_quality_err:.3f}'
                 )
 
-                # Decrease trust region radius.
-                self._r /= 2
+                # Halve radius.
+                self._r = self._r / 2
+                logger.getChild('step').info(f'radius = {self._r} (rho = {step_quality})')
 
                 # Terminate if radius is too small.
                 if self._r < 1000 * numpy.finfo(float).eps:

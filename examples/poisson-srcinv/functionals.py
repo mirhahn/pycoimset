@@ -161,13 +161,17 @@ class ObjectiveFunctional(pycoimset.Functional[SimilaritySpace]):
         eval = self.evaluator
         eval.eval_grad()
 
-        # Map fine gradient to elements of coarse mesh.
-        elmap = arg.mesh.element_map(eval.mesh)
-        fine_dof = eval.grad
-        coarse_dof = numpy.zeros(arg.mesh.mesh.nelements)
-        numpy.add.at(coarse_dof, elmap, fine_dof)
-        del elmap, fine_dof
+        # Coarsening step (skipped to keep refinement from successful steps.)
+#        # Map fine gradient to elements of coarse mesh.
+#        elmap = arg.mesh.element_map(eval.mesh)
+#        fine_dof = eval.grad
+#        coarse_dof = numpy.zeros(arg.mesh.mesh.nelements)
+#        numpy.add.at(coarse_dof, elmap, fine_dof)
+#        del elmap, fine_dof
+#
+#        coarse_dof = -(2 * arg.flag - 1) * coarse_dof / arg.mesh.element_measure
+#        grad = SignedMeasure(self.input_space, arg.mesh, coarse_dof)
 
-        coarse_dof = -(2 * arg.flag - 1) * coarse_dof / arg.mesh.element_measure
-        grad = SignedMeasure(self.input_space, arg.mesh, coarse_dof)
-        return grad, eval.graderr.sum()
+        dof = -(2 * eval.ctrl - 1) * eval.grad / eval.vol
+        grad = SignedMeasure(self.input_space, Mesh(eval.mesh, parent=self.arg.mesh), dof)
+        return grad, numpy.abs(eval.graderr).sum()

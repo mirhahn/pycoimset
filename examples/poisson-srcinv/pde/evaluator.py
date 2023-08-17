@@ -6,16 +6,30 @@ from dataclasses import dataclass, field
 from functools import cached_property
 import math
 import time
-from typing import NamedTuple, cast
+from typing import NamedTuple, Optional, cast
+from matplotlib.patheffects import withTickedStroke
 
+from numpy import float_
+from numpy.typing import NDArray
 import numpy
 from skfem import Basis, BilinearForm, DiscreteField, ElementTriP0, ElementTriP1, ElementTriP2, FacetBasis, Functional, InteriorFacetBasis, LinearForm, Mesh, MeshTri, condense, solve
-import skfem
 from skfem.helpers import grad
+import skfem
+import skfem.utils
 
 from pycoimset.util import depends_on, notify_property_update, tracks_dependencies
 
-from .forms import L, a, a_w, e_fac, e_int, ge_fac, ge_int
+from .forms import L, a, a_w, e_fac, e_int, ge_int
+
+
+def refine_mesh(mesh: skfem.MeshTri, wgt: NDArray[float_], tol: float, vol: Optional[NDArray[float_]] = None, max_frac: Optional[float] = None) -> skfem.MeshTri:
+    sort_idx = numpy.argsort(wgt) if vol is None else numpy.argsort(wgt / vol)
+    sorted_wgt = wgt[sort_idx]
+    split_idx = numpy.searchsorted(sorted_wgt, tol / len(sorted_wgt), side='right')
+    if max_frac is not None:
+        split_idx = max(int(split_idx), math.floor((1 - max_frac) * len(sorted_wgt)))
+    where = sort_idx[split_idx:]
+    return cast(skfem.MeshTri, mesh.refined(where))
 
 
 class FunctionSpaces:
@@ -101,7 +115,7 @@ class PoissonEvaluator:
         })
         self._spc = FunctionSpaces(self._mesh)
         self._w = ctrl_dof
-        self._f = 1e-2
+        self._f = 0.02
         self._tol = PoissonEvaluator.Tolerances(obj_tol, grad_tol)
         self._stats = PoissonEvaluator.Statistics()
 
@@ -191,7 +205,8 @@ class PoissonEvaluator:
             f=self._f
         )
         sys = condense(A, b, D=self._spc.p1.get_dofs('dirichlet'))
-        result = cast(numpy.ndarray, solve(*sys))   # type: ignore
+        solver = skfem.utils.solver_iter_pcg(atol=0, tol=1e-3)
+        result = cast(numpy.ndarray, solve(*sys, solver=solver))    # type: ignore
         time_end = time.perf_counter()
         self._stats.pdesol.time += time_end - time_start
         self._stats.pdesol.num += 1
@@ -212,7 +227,8 @@ class PoissonEvaluator:
             f=self._f
         )
         sys = condense(A, b, D=self._spc.p2.get_dofs('dirichlet'))
-        result = cast(numpy.ndarray, solve(*sys))   # type: ignore
+        solver = skfem.utils.solver_iter_pcg(atol=0, tol=1e-3)
+        result = cast(numpy.ndarray, solve(*sys, solver=solver))    # type: ignore
         time_end = time.perf_counter()
         self._stats.qpdesol.time += time_end - time_start
         self._stats.qpdesol.num += 1
@@ -332,102 +348,31 @@ class PoissonEvaluator:
     @cached_property
     def graderr(self) -> numpy.ndarray:
         '''Gradient L^1 error estimator.'''
-        # FIXME: Bypass error control for gradient.
-        return numpy.zeros(self.mesh.nelements)
+        # Retrieve spaces and mesh.
+        s = self.spaces
+        m = self.mesh
 
-#         # Retrieve spaces and mesh.
-#         s = self.spaces
-#         m = self.mesh
-# 
-#         # Get DOF vectors.
-#         w = self._w
-#         f = self._f
-#         y = self.qpdesol
-#         yh = self.pdesol
-#         z = self.qadjsol
-#         zh = self.adjsol
-# 
-#         # Set up quadrature spaces for interior terms.
-#         q1 = s.p1
-#         q0 = s.p1.with_element(s.p0.elem())
-# 
-#         # Assemble interior residual terms.
-#         int_func = Functional(lambda w: ge_int(w.zh, w.w, 1.0, w.f))
-#         eta_int = int_func.elemental(
-#             q1,
-#             zh=q1.interpolate(zh),
-#             w=q0.interpolate(w),
-#             f=f
-#         )
-#         eta_int += int_func.elemental(
-#             q1,
-#             zh=q1.interpolate(yh),
-#             w=q0.interpolate(w),
-#             f=f
-#         )
-# 
-#         # Create buffer for facet terms.
-#         fac_buf = numpy.zeros((2, m.nfacets))
-# 
-#         # Set up functional for facet term assembly.
-#         fac_func = Functional(lambda w: ge_fac(
-#             w.gy, w.yh, w.zh, 1.0, (-1)**w.idx * w.n
-#         ))
-# 
-#         # Assemble facet terms.
-#         for basis_type, subset, side, y_actual, z_actual in (
-#             (InteriorFacetBasis, None, 0, y, z),
-#             (InteriorFacetBasis, None, 1, y, z),
-#             (FacetBasis, 'neumann', 0, 0, 0),
-#         ):
-#             # Set up quadrature spaces.
-#             q1 = basis_type(m, s.p1.elem(), facets=subset, side=side)
-#             q2 = basis_type(m, s.p2.elem(), facets=subset, side=side,
-#                             quadrature=q1.quadrature)
-# 
-#             # Project constants.
-#             if 
-# 
-#             fac_buf[side, q1.find] += fac_func.assemble(
-#                 q1,
-#                 gy=(0.0 if y_actual is None
-#                     else grad(
-#                         cast(DiscreteField, q2.interpolate(y_actual))
-#                     )),
-#                 yh=q1.interpolate(yh),
-#                 zh=q1.interpolate(zh),
-#                 idx=side
-#             )
-#             fac_buf[side, q1.find] += fac_func.assemble(
-#                 q1,
-#                 gy=(0.0 if z_actual is None
-#                     else grad(
-#                         cast(DiscreteField, q2.interpolate(z_actual))
-#                     )),
-#                 yh=q1.interpolate(zh),
-#                 zh=q1.interpolate(yh),
-#                 idx=side
-#             )
-#         print(f'max(abs(eta_int)) = {numpy.max(numpy.abs(eta_int))}')
-#         print(f'max(abs(fac_buf)) = {numpy.max(numpy.abs(fac_buf))}')
-# 
-#         # Find total contribution of each element.
-#         eta_el = numpy.copy(eta_int)
-#         numpy.add.at(eta_el, m.f2t, fac_buf)
-#         sign = numpy.where(eta_el < 0.0, -1.0, 1.0)
-# 
-#         # Adjust sign of elemental contributions.
-#         breakpoint()
-#         eta_int *= sign
-#         fac_buf *= sign[m.f2t]
-# 
-#         # Aggregate cell terms
-#         valid_el = m.f2t >= 0
-#         num_el = valid_el.sum(axis=0)
-#         fac_buf = numpy.tile(fac_buf.sum(axis=0) / num_el, (2, 1))
-#         numpy.add.at(eta_int, m.f2t[valid_el], fac_buf[valid_el])
-# 
-#         return eta_int
+        # Get DOF vectors.
+        y = self.qpdesol
+        yh = self.pdesol
+        z = self.qadjsol
+        zh = self.adjsol
+
+        # Set up quadrature spaces for interior terms.
+        q2 = s.p2
+        q1 = s.p2.with_element(s.p1.elem())
+
+        # Assemble interior residual terms.
+        int_func = Functional(lambda w: ge_int(w.y, w.yh, w.z, w.zh))
+        eta_int = int_func.elemental(
+            q2,
+            y=q2.interpolate(y),
+            yh=q1.interpolate(yh),
+            z=q2.interpolate(z),
+            zh=q1.interpolate(zh)
+        )
+
+        return numpy.abs(eta_int)
 
     def eval_obj(self) -> float:
         '''
@@ -435,17 +380,7 @@ class PoissonEvaluator:
         '''
         while ((err := abs(numpy.sum((eta := self.objerr)).item()))
                > self._tol.obj):
-            eta = numpy.abs(eta)
-            sort_idx = numpy.argsort(eta)
-            cum_err = numpy.cumsum(eta[sort_idx])
-            split_idx = numpy.searchsorted(cum_err, 0.7 * cum_err[-1])
-            if split_idx == cum_err.size:
-                split_idx = cum_err.size - 1
-            where = sort_idx[split_idx:]
-
-            rmesh = self._mesh.refined(where)
-            assert isinstance(rmesh, skfem.MeshTri)
-            self.mesh = rmesh
+            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.obj, 0.01)
         return err
 
     def eval_grad(self) -> float:
@@ -454,15 +389,6 @@ class PoissonEvaluator:
         '''
         while ((err := numpy.sum((eta := self.graderr)).item())
                > self._tol.grad):
-            eta = numpy.abs(eta)
-            sort_idx = numpy.argsort(eta)
-            cum_err = numpy.cumsum(eta[sort_idx])
-            split_idx = numpy.searchsorted(cum_err, 0.7 * cum_err[-1])
-            if split_idx == cum_err.size:
-                split_idx = cum_err.size - 1
-            where = sort_idx[split_idx:]
-
-            rmesh = self._mesh.refined(where)
-            assert isinstance(rmesh, skfem.MeshTri)
-            self.mesh = rmesh
+            print(err)
+            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.grad, 0.01)
         return err

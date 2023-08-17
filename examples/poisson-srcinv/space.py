@@ -8,7 +8,7 @@ from types import NotImplementedType
 from typing import Generic, Optional, Protocol, Self, TypeVar, cast
 
 import numpy
-from numpy import float_
+from numpy import bool_, float_
 from numpy.typing import ArrayLike, NDArray
 import pycoimset.typing
 import pycoimset.util.weakref as weakref
@@ -319,22 +319,32 @@ class BoolArrayClass(SimilarityClass):
         while True:
             # Find element indices and element measures.
             tind = numpy.flatnonzero(refined.flag)
+            mesh = refined.mesh.mesh
+            assert isinstance(mesh, skfem.MeshTri1)
             meas = refined.mesh.element_measure[tind]
-            min_meas = cast(float, numpy.min(meas))
+
+            # Fit the largest cells first.
+            idx = numpy.flip(numpy.argsort(meas))
+            tind_sort = tind[idx]
+            meas_sort = numpy.cumsum(meas[idx])
+            end = numpy.searchsorted(meas_sort, meas_high, side='right')
+
+            # Set up flag array.
+            flag = numpy.zeros(mesh.nelements, dtype=bool_)
+            flag[tind_sort[:end]] = True
+            meas_base = 0.0 if end == 0 else meas_sort[end - 1]
 
             # Approximately solve subset sum problem.
-            flag = solve_subset_sum(meas, meas_high,
+            meas_sort = meas[idx]
+            min_meas = meas_sort[-1]
+            pick = solve_subset_sum(meas_sort[end:], meas_high - meas_base,
                                     min((meas_high - meas_low) / 2,
                                         min_meas) / 2)
-            cum_meas = cast(float, numpy.sum(meas[flag]))
+            flag[tind_sort[end:][pick]] = True
+            meas_total = meas_base + cast(float, numpy.sum(meas_sort[end:][pick]))
 
-            if cum_meas >= meas_low:
+            if meas_total >= meas_low:
                 break
-
-            # Sort elements by size for refinement.
-            idx_sort = numpy.flip(numpy.argsort(meas))
-            end = math.floor(len(idx_sort) / 3) + 1
-            tind = tind[idx_sort[:end]]
 
             # Refine mesh
             base_mesh = refined.mesh.mesh.refined(tind)
@@ -342,9 +352,7 @@ class BoolArrayClass(SimilarityClass):
             refined = self.adapt(mesh)
 
         # Return result.
-        set_flag = numpy.zeros_like(refined.flag)
-        set_flag[tind[flag]] = True
-        return BoolArrayClass(self.space, refined.mesh, set_flag)
+        return BoolArrayClass(self.space, refined.mesh, flag)
 
     def _subset_hint(self, meas_low: float, meas_high: float,
                      hint: 'SignedMeasure') -> 'BoolArrayClass':

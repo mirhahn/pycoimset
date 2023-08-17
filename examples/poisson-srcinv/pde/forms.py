@@ -2,12 +2,18 @@
 Basic forms for the FEM solver.
 '''
 
+from typing import cast
+
+import numpy
 from skfem.helpers import dot, grad
 
 
 __all__ = [
-    'a', 'a_w', 'L', 'e_int', 'e_fac', 'ge_int', 'ge_fac'
+    'a', 'a_w', 'L', 'e_int', 'e_fac', 'ge_int'
 ]
+
+
+eps = 0.1
 
 
 def k(w):
@@ -19,14 +25,14 @@ def k(w):
     w : array-like
         Control value. Should be between 0 and 1.
     '''
-    return 0.1 + 0.9 * w
+    return eps + (1 - eps) * w
 
 
 def dkdw():
     '''
     Derivative of diffusivity with respect to control.
     '''
-    return 0.9
+    return (1 - eps)
 
 
 def a(u, v, w):
@@ -111,44 +117,27 @@ def e_fac(y, z, zh, w, n):
     return dot(k(w) * grad(y), n) * (z - zh)
 
 
-def ge_int(z, w, dw, f):
+def ge_int(y, yh, z, zh):
     '''
     Interior term of gradient error estimator.
 
     Parameters
     ----------
-    z
+    zh
         P1 approximation of averaged solution.
-    w
-        Control function.
-    dw
-        Control perturbation.
-    f
-        Source density.
+    y
+        P2 approximation of difference solution
+    yh
+        P1 approximation of difference solution
 
     Remarks
     -------
     This term is symmetric in the sense that the "averaged solution"
     can be either the PDE solution or the adjoint state.
     '''
-    return dkdw() / k(w) * dw * f * z
-
-
-def ge_fac(gy, yh, z, dw, n):
-    '''
-    Facet term of gradient error estimator.
-
-    Parameters
-    ----------
-    gy
-        Gradient field of higher order approximation.
-    yh
-        P1 approximation of difference solution.
-    z
-        P1 approximation of averaged solution.
-    dw
-        Control perturbation.
-    n
-        Outer unit normal.
-    '''
-    return dkdw() * dw * dot(gy - grad(yh), n) * z # type: ignore
+    gy, gyh, gz, gzh = (cast(numpy.ndarray, grad(f)) for f in (y, yh, z, zh))
+    dgy = gy - gyh
+    dgz = gz - gzh
+    return dkdw() * (dot(dgy, gzh)
+                     + dot(dgz, gyh))
+#                     + dot(dgy, dgz))

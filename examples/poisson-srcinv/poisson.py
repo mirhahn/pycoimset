@@ -36,9 +36,8 @@ class Callback:
 
         # Retrieve objective functional.
         obj_func = solver.objective_functional
-        if not isinstance(obj_func, with_safety_factor):
-            return
-        obj_func = obj_func.base_functional
+        if isinstance(obj_func, with_safety_factor):
+            obj_func = obj_func.base_functional
         if not isinstance(obj_func, ObjectiveFunctional):
             return
         
@@ -71,7 +70,7 @@ class Callback:
 
 # Set up logging.
 logging.basicConfig(format=logging.BASIC_FORMAT)
-logging.getLogger('pycoimset').setLevel(logging.WARNING)
+logging.getLogger('pycoimset').setLevel(logging.INFO)
 logging.getLogger('skfem').setLevel(logging.ERROR)
 logging.getLogger('space').setLevel(logging.DEBUG)
 
@@ -111,22 +110,23 @@ ctrl = BoolArrayClass(space, space.mesh)
 #)
 #solver.solve()
 
+# NOTE: Would terminate with abstol=1e-4 after 51 iterations
 sol_param = PenaltySolver.Parameters(
     abstol=1e-5,
-    feas_tol=1e-5,
-    thres_accept=0.1,
-    thres_reject=0.2,
-    thres_tr_expand=0.5,
-    margin_instat=1e-3,
-    margin_proj_desc=1e-3,
-    margin_step=1e-3,
+    feas_tol=0.01,
+    thres_accept=1e-5,
+    thres_reject=0.7,
+    thres_tr_expand=0.9,
+    margin_instat=0.99,
+    margin_proj_desc=0.99,
+    margin_step=0.01,
     tr_radius=0.01
 )
 solver = PenaltySolver(
-    with_safety_factor(ObjectiveFunctional(space), 2.0),
+    with_safety_factor(ObjectiveFunctional(space), 0.05),
     MeasureFunctional(space) <= 0.4,
     x0=ctrl,
-    mu=1e-5,
+    mu=0.01,
     err_wgt=[1.0, 0.0],
     param=sol_param,
     callback=Callback()
