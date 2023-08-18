@@ -5,9 +5,9 @@ Solver for the "Topology optimisation of heat conduction problems
 governed by the Poisson equation" example of the 
 '''
 
+import argparse
 import json
 import logging
-import resource
 import sys
 from typing import cast
 import warnings
@@ -31,18 +31,27 @@ class Callback:
     def __init__(self, file: str = 'iterate_{idx:04d}.vtk'):
         self._tmpl = file
 
-    def __call__(self, solver: PenaltySolver):
+    def __call__(self, solver: PenaltySolver | UnconstrainedSolver):
+        # Extract solution and objective functional.
+        if isinstance(solver, PenaltySolver):
+            obj_func = solver.objective_functional
+            sol = solver.solution
+        else:
+            obj_func = solver.objective
+            sol = solver.solution.arg
+
         # Retrieve solution.
-        sol = solver.solution
         if not isinstance(sol, BoolArrayClass):
             return
 
         # Retrieve objective functional.
-        obj_func = solver.objective_functional
-        if isinstance(obj_func, with_safety_factor):
-            obj_func = obj_func.base_functional
-        if not isinstance(obj_func, ObjectiveFunctional):
-            return
+        while not isinstance(obj_func, ObjectiveFunctional):
+            if isinstance(obj_func, with_safety_factor):
+                obj_func = obj_func.base_functional
+            elif isinstance(obj_func, weighted_sum):
+                obj_func = obj_func[0]
+            else:
+                raise TypeError()
         
         obj_func.get_value()
         obj_func.get_gradient()
@@ -71,82 +80,118 @@ class Callback:
         mesh.write(self._tmpl.format(idx=solver.stats.n_iter))
 
 
+# Parse command line arguments.
+parser = argparse.ArgumentParser()
+parser.add_argument('-pp', '--problem', dest='problem_parameters',
+                    type=argparse.FileType('r'), help='JSON file with problem '
+                    'parameters.')
+parser.add_argument('-sp', '--solver', dest='solver_parameters',
+                    type=argparse.FileType('r'), help='JSON file with solver '
+                    'parameters.')
+parser.add_argument('-p', '--param', dest='parameters',
+                    type=argparse.FileType('r'), help='Combined JSON file '
+                    'with problem and solver parameters.')
+parser.add_argument('-op', '--param-out', dest='parameter_output',
+                    type=argparse.FileType('w'), help='Write combined JSON '
+                    'file with problem and solver parameters.')
+parser.add_argument('-v', '--verbose', nargs='?', type=int, default=0,
+                    help='Include debugging output (optional level).')
+args = parser.parse_args()
+
 # Set up logging.
 logging.basicConfig(format=logging.BASIC_FORMAT, stream=sys.stdout)
-logging.getLogger('pycoimset').setLevel(logging.INFO)
 logging.getLogger('skfem').setLevel(logging.ERROR)
-logging.getLogger('space').setLevel(logging.DEBUG)
-logging.getLogger('pde.evaluator').setLevel(logging.DEBUG)
+if args.verbose <= 0:
+    logging.getLogger('pycoimset').setLevel(logging.WARNING)
+    logging.getLogger('space').setLevel(logging.INFO)
+    logging.getLogger('pde.evaluator').setLevel(logging.INFO)
+elif args.verbose <= 1:
+    logging.getLogger('pycoimset').setLevel(logging.INFO)
+    logging.getLogger('space').setLevel(logging.DEBUG)
+    logging.getLogger('pde.evaluator').setLevel(logging.DEBUG)
+else:
+    logging.getLogger('pycoimset').setLevel(logging.DEBUG)
+    logging.getLogger('space').setLevel(logging.DEBUG)
+    logging.getLogger('pde.evaluator').setLevel(logging.DEBUG)
 
 # Set resource limits and convert warnings to exceptions.
 #resource.setrlimit(resource.RLIMIT_DATA, (2 * 2**30, 3 * 2**30))
 warnings.simplefilter('error')
 
-# NOTE: Would terminate with abstol=1e-4 and safety factor 0.05 after 51 iterations
-sol_param = PenaltySolver.Parameters(
-    abstol=1e-4,
-    feas_tol=0.01,
-    thres_accept=1e-5,
-    thres_reject=0.7,
-    thres_tr_expand=0.9,
-    margin_instat=0.99,
-    margin_proj_desc=0.99,
-    margin_step=1e-3,
-    tr_radius=0.01
-)
-prob_param = {
-    'safety_factor': 0.05,
-    'measure_bound': 0.5,
-    'mu_init': 0.01,
-    'initial_resolution': 6
-}
+# Extract parameters.
+sol_param = {}
+prob_param = {}
+if args.parameters is not None:
+    with args.parameters as f:
+        d = json.load(f)
+    assert isinstance(d, dict)
+    sol_param = d.get('solver', sol_param)
+    prob_param = d.get('problem', prob_param)
+if args.solver_parameters is not None:
+    with args.solver_parameters as f:
+        d = json.load(f)
+    assert isinstance(d, dict)
+    sol_param = d
+if args.problem_parameters is not None:
+    with args.problem_parameters as f:
+        d = json.load(f)
+    assert isinstance(d, dict)
+    prob_param = d
+assert isinstance(sol_param, dict)
+assert isinstance(prob_param, dict)
 
-with open('parameters.json', 'w') as f:
-    json.dump({
-        'problem': prob_param,
-        'solver': sol_param.toJSON()
-    }, f, indent=4)
-
+# Construct initial mesh.
 initial_mesh = skfem.MeshTri().refined(prob_param.get('initial_resolution', 6))
 assert isinstance(initial_mesh, skfem.MeshTri)
-
 space = SimilaritySpace(initial_mesh)
 ctrl = BoolArrayClass(space, space.mesh)
 
-#sol_param = SolverParameters(
-#    abstol=1e-5,
-#    thres_accept=0.1,
-#    thres_reject=0.6,
-#    thres_tr_expand=0.9,
-#    margin_instat=0.5,
-#    margin_proj_desc=0.5,
-#    margin_step=0.5,
-#    tr_radius=0.01
-#)
-#solver = UnconstrainedSolver(
-#    weighted_sum(
-#        [
-#            with_safety_factor(ObjectiveFunctional(space), 2.0),
-#            MeasureFunctional(space)
-#        ],
-#        [1.0, 8.75e-5],
-#        [1.0, 0.0],
-#        [1.0, 0.0]
-#    ),
-#    initial_sol=ctrl,
-#    callback=Callback(),
-#    param=sol_param
-#)
-#solver.solve()
+# Set up solver.
+sol_type = sol_param.pop('type', 'penalty')
+if sol_type == 'unconstrained':
+    sol_param = SolverParameters(**sol_param)
+    solver = UnconstrainedSolver(
+        weighted_sum(
+            [
+                with_safety_factor(
+                    ObjectiveFunctional(space),
+                    prob_param.setdefault('safety_factor', 0.05)
+                ),
+                MeasureFunctional(space)
+            ],
+            [1.0, prob_param.setdefault('mu_init', 8.75e-5)],
+            [1.0, 0.0],
+            [1.0, 0.0]
+        ),
+        initial_sol=ctrl,
+        callback=Callback(),
+        param=sol_param
+    )
+elif sol_type == 'penalty':
+    sol_param = PenaltySolver.Parameters(**sol_param)
+    solver = PenaltySolver(
+        with_safety_factor(ObjectiveFunctional(space),
+                           prob_param.setdefault('safety_factor', 0.05)),
+        MeasureFunctional(space) <= prob_param.setdefault('measure_bound', 0.4),
+        x0=ctrl,
+        mu=prob_param.setdefault('mu_init', 0.01),
+        err_wgt=[1.0, 0.0],
+        param=sol_param,
+        callback=Callback()
+    )
+else:
+    raise ValueError(f'unknown solver type {sol_type}')
 
-solver = PenaltySolver(
-    with_safety_factor(ObjectiveFunctional(space),
-                       prob_param['safety_factor']),
-    MeasureFunctional(space) <= prob_param['measure_bound'],
-    x0=ctrl,
-    mu=prob_param['mu_init'],
-    err_wgt=[1.0, 0.0],
-    param=sol_param,
-    callback=Callback()
-)
+# Write parameters if requested.
+if args.parameter_output is not None:
+    d = {
+        'solver': {'type': sol_type},
+        'problem': prob_param
+    }
+    d['solver'].update(sol_param.toJSON())
+
+    with args.parameter_output as f:
+        json.dump(d, f, indent=4)
+
+# Solve the problem.
 solver.solve()

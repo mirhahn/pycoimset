@@ -19,6 +19,7 @@ Implementations of the basic unconstrained optimization loop.
 from dataclasses import dataclass
 from enum import IntEnum
 import math
+import time
 from typing import Callable, Generic, NamedTuple, Optional, Self, TypeVar
 
 import numpy
@@ -151,20 +152,37 @@ class SolverStats:
 
 
 class SolverStatus(IntEnum):
-    RUNNING = 0
-    STATIONARY = 1
-    ERROR_UNKNOWN = 64,
-    ERROR_INTERRUPTED = 65
-    ERROR_PRECISION = 66
-    ERROR_MAX_ITER = 67
+    Running = 0
+    Solved = 1
+    UnknownError = 64,
+    UserInterruption = 65
+    SmallStep = 66
+    IterationMaximum = 67
+
+    Message: dict[Self, str]
 
     @property
     def is_running(self) -> bool:
-        return self == SolverStatus.RUNNING
+        return self == SolverStatus.Running
 
     @property
     def is_error(self) -> bool:
-        return self >= SolverStatus.ERROR_UNKNOWN
+        return self >= SolverStatus.UnknownError
+    
+    @property
+    def message(self) -> str:
+        '''Describe status.'''
+        return type(self).Message.get(self, '(missing status message)')
+
+
+SolverStatus.Message = {
+    SolverStatus.Running: "still running",
+    SolverStatus.Solved: "solution found",
+    SolverStatus.UnknownError: "unknown error",
+    SolverStatus.IterationMaximum: "iteration maximum exceeded",
+    SolverStatus.SmallStep: "step too small",
+    SolverStatus.UserInterruption: "interrupted by user",
+}
 
 
 class ValueErrorPair(NamedTuple, Generic[T]):
@@ -359,7 +377,7 @@ class Solver(Generic[Spc]):
             self.param = SolverParameters(**kwargs)
 
         # Set up remaining data.
-        self.status = SolverStatus.RUNNING
+        self.status = SolverStatus.Running
         self.radius = max(0.0, min(self.param.tr_radius,
                                    obj_func.input_space.measure))
         self.curvature = 0.0
@@ -373,8 +391,9 @@ class Solver(Generic[Spc]):
 
         # Set up logger.
         self.logger = TabularLogger(
-            cols=['iter', 'obj', 'instat', 'step', 'tr_fail'],
+            cols=['time', 'iter', 'obj', 'instat', 'step', 'tr_fail'],
             format={
+                'time': '8.2f',
                 'iter': '4d',
                 'obj': '13.6e',
                 'instat': '13.6e',
@@ -382,6 +401,7 @@ class Solver(Generic[Spc]):
                 'tr_fail': '7d'
             },
             width={
+                'time': 8,
                 'iter': 4,
                 'obj': 13,
                 'instat': 13,
@@ -504,7 +524,7 @@ class Solver(Generic[Spc]):
 
         # Perform stationarity test.
         if tau.value <= self.param.abstol:
-            self.status = SolverStatus.STATIONARY
+            self.status = SolverStatus.Solved
             return
 
         accepted = False
@@ -560,7 +580,7 @@ class Solver(Generic[Spc]):
                 self.radius /= 2
 
                 if self.radius < 1000 * numpy.finfo(float).eps:
-                    self.status = SolverStatus.ERROR_PRECISION
+                    self.status = SolverStatus.SmallStep
                     return
 
                 # Increase rejection counter.
@@ -575,8 +595,12 @@ class Solver(Generic[Spc]):
         '''
         Run the main optimization loop.
         '''
+        # Record start time.
+        start_time = time.perf_counter()
+        
         # Print initial log line.
         self.logger.push_line(
+            time=time.perf_counter() - start_time,
             iter=self.stats.n_iter,
             obj=self.solution.val.value,
             instat=self.solution.instationarity.value
@@ -586,12 +610,13 @@ class Solver(Generic[Spc]):
 
         old_iter = self.stats.n_iter
         max_iter = self.param.max_iter
-        self.status = SolverStatus.RUNNING
+        self.status = SolverStatus.Running
         while (self.status.is_running and
                (max_iter is None or self.stats.n_iter - old_iter < max_iter)):
             old_reject = self.stats.n_reject
             self.step()
             self.logger.push_line(
+                time=time.perf_counter() - start_time,
                 iter=self.stats.n_iter,
                 obj=self.solution.val.value,
                 instat=self.solution.instationarity.value,
@@ -602,4 +627,7 @@ class Solver(Generic[Spc]):
                 self.callback(self)
 
         if self.status.is_running:
-            self.status = SolverStatus.ERROR_MAX_ITER
+            self.status = SolverStatus.IterationMaximum
+
+        # Print termination reason.
+        print(f'Terminated: {self.status.message}')
