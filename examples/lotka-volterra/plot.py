@@ -16,7 +16,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import argparse
 import json
+import os
 from re import A
 from typing import Sequence
 
@@ -64,52 +66,67 @@ def trajectory_grid(times: ArrayLike, trajectories: Sequence[OdeSolutionLike]
 # Load SciPy extensions
 lotka_volterra.ext.scipy.register_extensions()
 
-# Load JSON solution
-with open('solution.json', 'r') as f:
-    sol_dat = json.load(f)
+# Parse command line arguments.
+parser = argparse.ArgumentParser()
+parser.add_argument('sol_file', nargs='*', type=str, help='Solution files.')
+parser.add_argument('-e', '--ext', type=str, help='Save plot with new extension')
+args = parser.parse_args()
 
-# Create required objects
-x = IntervalSimilarityClass.fromJSON(sol_dat['argument'])
-f = LotkaObjectiveFunctional(x.space)
+for sol in args.sol_file:
+    # Load JSON solution
+    with open(sol, 'r') as f:
+        sol_dat = json.load(f)
 
-# Evaluate functional
-f.arg = x
-f.val_tol = sol_dat['tolerances']['objective']
-f.grad_tol = sol_dat['tolerances']['gradient']
-f.get_gradient()
+    # Create required objects
+    x = IntervalSimilarityClass.fromJSON(sol_dat['argument'])
+    f = LotkaObjectiveFunctional(x.space)
 
-# Generate a sample space
-t_sample = numpy.linspace(*x.space.time_range, num=1201, endpoint=True)
-t_sample_adj = f.ivp_objects.adj.import_times(t_sample)
+    # Evaluate functional
+    f.arg = x
+    f.val_tol = sol_dat['tolerances']['objective']
+    f.grad_tol = sol_dat['tolerances']['gradient']
+    f.get_gradient()
 
-# Evaluate primal state and gradient density.
-traj_fwd = f.trajectories.fwd
-traj_grad = f.trajectories.grad_dens
-assert traj_fwd is not None and traj_grad is not None
-t_grid, i_grid = trajectory_grid(t_sample, traj_fwd)    # pyright: ignore
+    # Generate a sample space
+    t_sample = numpy.linspace(*x.space.time_range, num=1201, endpoint=True)
+    t_sample_adj = f.ivp_objects.adj.import_times(t_sample)
 
-y_sample = numpy.empty((len(t_grid), 3))
-g_sample = numpy.empty((len(t_grid), 1))
-for idx, (y_traj, g_traj) in enumerate(zip(traj_fwd, traj_grad)):
-    where = numpy.flatnonzero(i_grid == idx)
-    if len(where) > 0:
-        y_sample[where, :] = y_traj(t_grid[where]).T
-        g_sample[where, :] = g_traj(t_grid[where]) * (-1)**idx
+    # Evaluate primal state and gradient density.
+    traj_fwd = f.trajectories.fwd
+    traj_grad = f.trajectories.grad_dens
+    assert traj_fwd is not None and traj_grad is not None
+    t_grid, i_grid = trajectory_grid(t_sample, traj_fwd)    # pyright: ignore
 
-# Generate plots
-t_switch = x.switch_times
-f, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+    y_sample = numpy.empty((len(t_grid), 3))
+    g_sample = numpy.empty((len(t_grid), 1))
+    for idx, (y_traj, g_traj) in enumerate(zip(traj_fwd, traj_grad)):
+        where = numpy.flatnonzero(i_grid == idx)
+        if len(where) > 0:
+            y_sample[where, :] = y_traj(t_grid[where]).T
+            g_sample[where, :] = g_traj(t_grid[where]) * (-1)**idx
 
-for t0, t1 in zip(t_switch[::2], t_switch[1::2]):
-    ax1.axvspan(t0, t1, alpha=0.25)
-    ax2.axvspan(t0, t1, alpha=0.25)
+    # Generate plots
+    t_switch = x.switch_times
+    f, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
 
-ax1.plot(t_grid, y_sample[:, :3], label=('Predator', 'Prey', 'Objective'))
-ax1.legend()
-ax2.plot(t_grid, numpy.fmin(0.0, g_sample))
+    for t0, t1 in zip(t_switch[::2], t_switch[1::2]):
+        ax1.axvspan(t0, t1, alpha=0.25)
+        ax2.axvspan(t0, t1, alpha=0.25)
 
-ax1.set_title('Primal State')
-ax2.set_title('Negative Gradient Density')
-plt.show()
+    ax1.plot(t_grid, y_sample[:, :3], label=('Predator', 'Prey', 'Objective'))
+    ax1.legend()
+    ax2.plot(t_grid, numpy.fmin(0.0, g_sample))
 
+    ax1.set_title('Primal State')
+    ax2.set_title('Negative Gradient Density')
+    if args.ext is None:
+        plt.show()
+    else:
+        base, _ = os.path.splitext(sol)
+        ext = args.ext
+        if not ext.startswith('.'):
+            ext = '.' + ext
+        plt.savefig(base + ext)
 
+    # Close figure.
+    plt.close(f)
