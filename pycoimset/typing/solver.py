@@ -35,7 +35,7 @@ class UnconstrainedStepFinder(Protocol[Spc]):
 
     @property
     def quality(self) -> float:
-        '''Return quality constant of this step finder.'''
+        '''Quality constant of this step finder.'''
         ...
 
     @property
@@ -45,7 +45,6 @@ class UnconstrainedStepFinder(Protocol[Spc]):
 
     @gradient.setter
     def gradient(self, grad: Optional[SignedMeasure[Spc]]) -> None:
-        '''Set gradient measure and discard all cached results.'''
         ...
 
     @property
@@ -55,7 +54,6 @@ class UnconstrainedStepFinder(Protocol[Spc]):
 
     @radius.setter
     def radius(self, r: float) -> None:
-        '''Set trust-region radius and discard cache.'''
         ...
 
     @property
@@ -65,7 +63,6 @@ class UnconstrainedStepFinder(Protocol[Spc]):
 
     @tolerance.setter
     def tolerance(self, tol: float) -> None:
-        '''Set step finding tolerance and discard cached values.'''
         ...
 
     def get_step(self) -> tuple[SimilarityClass[Spc], float]:

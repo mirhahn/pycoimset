@@ -15,6 +15,17 @@
 # limitations under the License.
 '''
 Dependency tracking between cached properties.
+
+Routines
+--------
+tracks_dependencies
+    Class decorator that enables property dependency tracking.
+
+depends_on
+    Method decorator that declares a property dependency.
+
+notify_property_update
+    Triggers a cache deletion cascade.
 '''
 
 import functools
@@ -33,11 +44,27 @@ Dependency = str | property | functools.cached_property
 
 
 class QualifiedDependency(NamedTuple):
+    '''
+    Internal data structure used to describe a dependency that requires
+    (potentially conditional) deletion of cached values.
+    '''
     dep: Dependency
     pred: Optional[Callable[[Any], bool]] = None
 
 
 def dep_str(dep: Dependency) -> str:
+    '''
+    Transforms a dependency into a string.
+
+    The string should uniquely identify the dependency within the
+    tracking object.
+
+    Parameters
+    ----------
+    dep : Dependency
+        A string, property, or cached property that functions as the
+        dependence.
+    '''
     if isinstance(dep, property):
         for func in (dep.fget, dep.fset, dep.fdel):
             if func is not None:
@@ -50,6 +77,21 @@ def dep_str(dep: Dependency) -> str:
 def depends_on(*deps: Dependency | tuple[Dependency, Callable[[Any], bool]]
                ) -> Callable[[functools.cached_property[T]],
                              functools.cached_property[T]]:
+    '''
+    Decorator declaring a dependency.
+
+    This decorator is attached to cached properties that have a
+    dependency. It must be applied after the `cached_property`
+    decorator.
+
+    Parameters
+    ----------
+    *deps : Dependency or tuple of Dependency and callable
+        An enumeration of dependencies. If a callable is provided,
+        it is invoked upon a change notification with the `self`
+        argument and the cached value is only deleted if the
+        callable returns `False`.
+    '''
     def dec(func: functools.cached_property):
         if len(deps) > 0:
             try:
@@ -68,11 +110,35 @@ def depends_on(*deps: Dependency | tuple[Dependency, Callable[[Any], bool]]
 
 
 @functools.singledispatch
-def notify_property_update(self, name):                     # pyright: ignore
+def notify_property_update(self, name):
+    '''
+    Notify of a property update.
+
+    This can only be invoked on classes that have the `tracks_dependencies`
+    decorator.
+
+    Parameters
+    ----------
+    self
+        The self reference of the tracking object.
+    name : str
+        Name of the property whose value has changed.
+    '''
     raise NotImplementedError()
 
 
 def tracks_dependencies(cls: Type[T]) -> Type[T]:
+    '''
+    Enables dependency tracking for a given class.
+
+    This defines an override for `notify_property_update`. It does not
+    actually modify the class.
+
+    Parameters
+    ----------
+    cls : Type[T]
+        Class to be modified.
+    '''
     # Build the map of dependents.
     deps_map = {}
     for member in cls.__dict__.values():

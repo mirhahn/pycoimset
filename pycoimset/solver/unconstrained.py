@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Implementations of the basic unconstrained optimization loop.
+Implementation of the basic unconstrained optimization loop.
 """
 
 from dataclasses import dataclass
@@ -56,6 +56,30 @@ class SolverParameters(JSONSerializable):
     thres_accept : float
         Model quality threshold above which steps are accepted. Defaults
         to ``0.2``.
+    thres_reject : float
+        Model quality threshold below which steps are rejected. Must be
+        strictly between `thres_accept` and ``1.0``.
+    thres_tr_expand : float
+        Model quality threshold above which the trust region is expanded.
+        Must be strictly greater than `thres_accept`.
+    margin_step : float
+        Error tuning parameter. Bounds the ratio between the step's
+        projected descent and the maximal projected descent for any
+        step within the trust region. Must be strictly between
+        ``0.0`` and ``1.0``. Defaults to ``0.25``.
+    margin_proj_desc : float
+        Error tuning parameter. Bounds the admissible relative error of
+        the projected step for the given step. Must be strictly between
+        ``0.0`` and ``1.0``. Defaults to ``0.1``.
+    margin_instat : float
+        Error tuning parameter. Bounds the ratio between instationarity
+        error and absolute termination tolerance. Must be strictly
+        between ``0.0`` and ``1.0``. Defaults to ``0.5``.
+    tr_radius : float, optional
+        Initial trust region radius. Clamped to search space diameter.
+        Defaults to `None`.
+    max_iter : int, optional
+        Iteration limit. Defaults to `None`.
     '''
 
     #: Absolute stationarity tolerance.
@@ -90,7 +114,7 @@ class SolverParameters(JSONSerializable):
     #: Initial trust region radius. This will be clamped to be a number
     #: strictly greater than 0 and less than or equal to the maximal step
     #: size possible in the variable space upon initialization.
-    tr_radius: float = math.inf
+    tr_radius: Optional[float] = None
 
     #: Maximum number of iterations.
     max_iter: Optional[int] = None
@@ -102,8 +126,8 @@ class SolverParameters(JSONSerializable):
         if self.max_iter is not None and self.max_iter < 0:
             self.max_iter = None
 
-        if self.tr_radius <= 0.0:
-            self.tr_radius = math.inf
+        if self.tr_radius is not None and self.tr_radius <= 0.0:
+            self.tr_radius = None
 
         if self.margin_step <= 0.0 or self.margin_step >= 1.0:
             self.margin_step = 0.5
@@ -379,7 +403,9 @@ class Solver(Generic[Spc]):
 
         # Set up remaining data.
         self.status = SolverStatus.Running
-        self.radius = max(0.0, min(self.param.tr_radius,
+        self.radius = max(0.0, min(self.param.tr_radius
+                                   if self.param.tr_radius is not None
+                                   else math.inf,
                                    obj_func.input_space.measure))
         self.curvature = 0.0
         self.stats = SolverStats()

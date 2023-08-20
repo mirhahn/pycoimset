@@ -33,9 +33,15 @@ __all__ = [
 
 
 Spc = TypeVar('Spc', bound=SimilaritySpace)
+'''
+Similarity space type variable.
+'''
 
 
 class Operator(Enum):
+    '''
+    Comparison operator for constraints.
+    '''
     is_satisfied: Callable[[float], bool]
     is_strictly_satisfied: Callable[[float], bool]
     violation: Callable[[float], float]
@@ -53,16 +59,19 @@ class Operator(Enum):
         lambda g: g < 0.0,
         lambda g: g
     )
+    '''Indicates a less-than-or-equal constraint.'''
     EQUAL_TO = (
         lambda g: g == 0.0,
         lambda _: False,
         lambda g: abs(g)
     )
+    '''Indicates an equality constraint.'''
     GREATER_THAN = (
         lambda g: g >= 0.0,
         lambda g: g > 0.0,
         lambda g: -g
     )
+    '''Indicates a greater-than-or-equal constraint.'''
 
 
 @dataclass(frozen=True)

@@ -699,7 +699,10 @@ class BarrierSolver(Generic[Spc]):
         self._status = type(self).Status.Running
         self._stats = type(self).Stats()
         self._step = SteepestDescentStepFinder()
-        self._r = min(self._par.tr_radius, x0.space.measure)
+        if self._par.tr_radius is None:
+            self._r = x0.space.measure
+        else:
+            self._r = min(self._par.tr_radius, x0.space.measure)
         self._c = 0.0
 
     def _errtol(self, tau: Optional[float] = None, rho: Optional[float] = None

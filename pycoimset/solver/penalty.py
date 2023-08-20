@@ -184,6 +184,32 @@ class PenaltyFunctionals(Generic[Spc]):
 
 @tracks_dependencies
 class PenaltySolution(Generic[Spc]):
+    '''
+    Representation of a penalty solution.
+
+    A solution consists of an argument alongside multiple evaluation
+    results.
+
+    Attributes
+    ----------
+    space
+    func
+    x
+    mu
+    val_wgt
+    grad_wgt
+    val_tol
+    grad_tol
+    con_tol
+    val_err_tuple
+    grad_err_tuple
+    obj_val
+    obj_grad
+    pen_val
+    pen_grad
+    full_step
+    tau
+    '''
     _F: PenaltyFunctionals
     _x: Optional[SimilarityClass[Spc]]
     _mu: float
@@ -641,7 +667,10 @@ class PenaltySolver(Generic[Spc]):
         self._step = step
 
         # Set up additional variables.
-        self._r = min(self._par.tr_radius, self.space.measure)
+        if self._par.tr_radius is None:
+            self._r = self.space.measure
+        else:
+            self._r = min(self._par.tr_radius, self.space.measure)
         self._c = 0.0
         self.status = type(self).Status.Running
         self.stats = type(self).Stats()

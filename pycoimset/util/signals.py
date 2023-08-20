@@ -13,12 +13,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+'''
+Helpers to intercept and defer user interruption signals.
+'''
+
 import contextlib
 import signal
 
 
-#: Global flag for SIGINT or SIGTERM.
 __interrupt: bool = False
+'''
+Global flag indicating that a SIGINT has been intercepted.
+'''
 
 
 def interrupt_requested() -> bool:
@@ -41,8 +47,8 @@ def setup_interrupt() -> None:
 
 
 @contextlib.contextmanager
-def delay_sigint():
-    '''Delay SIGINT until end of block.'''
+def defer_sigint():
+    '''Defer SIGINT until end of block.'''
     # Set up dummy handler.
     signal_received = None
     def handler(*args):
