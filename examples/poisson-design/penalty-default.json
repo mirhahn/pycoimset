@@ -1,13 +1,13 @@
 {
     "solver": {
         "type": "penalty",
-        "abstol": 0.0001,
+        "abstol": 1e-04,
         "thres_accept": 1e-05,
-        "thres_reject": 1e-03,
+        "thres_reject": 0.05,
         "thres_tr_expand": 0.9,
         "margin_step": 0.01,
-        "margin_proj_desc": 0.99,
-        "margin_instat": 0.99,
+        "margin_proj_desc": 0.9,
+        "margin_instat": 0.9,
         "tr_radius": 0.01,
         "max_iter": null,
         "feas_tol": 0.01
