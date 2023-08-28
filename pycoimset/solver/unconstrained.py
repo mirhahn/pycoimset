@@ -103,7 +103,7 @@ class SolverParameters(JSONSerializable):
 
     #: Error tuning parameter. Regulates the relative error of the
     #: projected descent for the given step. Must be strictly between
-    #: 0 and 1.
+    #: 0 and `1 - thres_reject`.
     margin_proj_desc: float = 0.1
 
     #: Error tuning parameter. Regulates the ratio between

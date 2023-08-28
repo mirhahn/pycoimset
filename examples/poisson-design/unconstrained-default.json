@@ -3,7 +3,7 @@
         "type": "unconstrained",
         "abstol": 0.0001,
         "thres_accept": 1e-05,
-        "thres_reject": 0.7,
+        "thres_reject": 1e-03,
         "thres_tr_expand": 0.9,
         "margin_step": 0.01,
         "margin_proj_desc": 0.99,
