@@ -19,6 +19,7 @@ Implementation of the basic unconstrained optimization loop.
 
 from dataclasses import dataclass
 from enum import IntEnum
+import logging
 import math
 import time
 from typing import Callable, Generic, NamedTuple, Optional, Self, TypeVar
@@ -28,6 +29,7 @@ import numpy
 from ..logging import TabularLogger
 from ..step import SteepestDescentStepFinder
 from ..typing import (
+    ErrorNorm,
     Functional,
     JSONSerializable,
     SignedMeasure,
@@ -41,6 +43,9 @@ __all__ = ['Solver']
 
 Spc = TypeVar('Spc', bound=SimilaritySpace)
 T = TypeVar('T')
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -476,10 +481,11 @@ class Solver(Generic[Spc]):
         if tau is None:
             tau = max(eps, self.solution.instationarity.value)
 
-        # Fall back to measure of universal set if full step appears
-        # empty.
-        if numpy.isclose(mu_full, 0.0):
-            mu_full = self.objective.input_space.measure
+        # Approximate upper bound to full step measure.
+        mu_full_ub = self.objective.input_space.measure
+        if norm is ErrorNorm.Linfty:
+            grad = self.solution.grad
+            mu_full_ub = (grad.value < grad.error).measure
 
         # Calculate lower bound for projected descent.
         expected_step_ratio = step_quality * min(
@@ -498,7 +504,7 @@ class Solver(Generic[Spc]):
             radius, xi_prdesc * proj_desc_min
         )
         grad_tol_full = norm.required_tolerance(
-            mu_full, xi_instat * max(tau - eps, eps)
+            mu_full_ub, xi_instat * max(tau - eps, eps)
         )
         grad_tol = min(grad_tol_step, grad_tol_full) / 2
 
@@ -540,23 +546,23 @@ class Solver(Generic[Spc]):
 
         # Evaluate instationarity.
         while True:
-            tau = self.solution.instationarity
-            obj_tol, grad_tol, step_tol = self._tolerances(tau=tau.value)
-            if tau.error <= self.param.margin_instat * max(
-                tau.value - self.param.abstol, self.param.abstol
+            obj_tol, grad_tol, step_tol = self._tolerances(tau=self.solution.instationarity.value)
+            if self.solution.instationarity.error <= self.param.margin_instat * max(
+                self.solution.instationarity.value - self.param.abstol, self.param.abstol
             ):
                 break
             self.solution.val_tol = obj_tol
             self.solution.grad_tol = grad_tol
 
         # Perform stationarity test.
-        if tau.value <= self.param.abstol:
+        if self.solution.instationarity.value <= self.param.abstol:
             self.status = SolverStatus.Solved
             return
 
         accepted = False
         while not accepted:
             # Find step.
+            assert self.solution.grad.error <= self.solution.grad_tol
             self.step_finder.gradient = self.solution.grad.value
             self.step_finder.radius = self.radius
             self.step_finder.tolerance = step_tol
@@ -568,7 +574,8 @@ class Solver(Generic[Spc]):
                 step.measure, self.solution.grad.error
             )
             if proj_chg_error > self.param.margin_proj_desc * abs(proj_chg):
-                obj_tol, grad_tol, step_tol = self._tolerances(tau.value, None)
+                logger.info(f'projected change error {proj_chg_error} > {self.param.margin_proj_desc * abs(proj_chg)}')
+                obj_tol, grad_tol, step_tol = self._tolerances(self.solution.instationarity.value, proj_chg / step.measure)
                 self.solution.val_tol = obj_tol
                 self.solution.grad_tol = grad_tol
                 continue
@@ -603,6 +610,9 @@ class Solver(Generic[Spc]):
 
                 accepted = True
             elif step_quality + step_quality_err < self.param.thres_reject:
+                # Log rejection.
+                logger.info(f'rejecting step with rho = {step_quality}')
+
                 # Decrease trust region radius.
                 self.radius /= 2
 
@@ -612,9 +622,12 @@ class Solver(Generic[Spc]):
 
                 # Increase rejection counter.
                 self.stats.n_reject += 1
+            else:
+                # Log insufficient precision event.
+                logger.info(f'step acceptance test inconclusive with rho = {step_quality} +- {step_quality_err}')
 
             # Adjust error tolerances.
-            obj_tol, grad_tol, step_tol = self._tolerances(tau.value, step_quality)
+            obj_tol, grad_tol, step_tol = self._tolerances(self.solution.instationarity.value, step_quality)
             self.solution.val_tol = obj_tol
             self.solution.grad_tol = grad_tol
 

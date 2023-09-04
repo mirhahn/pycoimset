@@ -93,6 +93,7 @@ args = parser.parse_args()
 # Set up logging.
 logging.basicConfig(stream=sys.stdout, format=logging.BASIC_FORMAT)
 if args.verbose is not None:
+    logging.getLogger("lotka_volterra.objective").setLevel(logging.DEBUG)
     if args.verbose >= 2:
         logging.getLogger('pycoimset').setLevel(logging.DEBUG)
     elif args.verbose >= 1:
@@ -122,7 +123,7 @@ if args.param_out is not None:
 
 # Define optimization problem
 space = IntervalSimilaritySpace((0.0, 12.0))
-objective = with_safety_factor(LotkaObjectiveFunctional(space), 2.0)
+objective = with_safety_factor(LotkaObjectiveFunctional(space), 4.0)
 
 # Set up solver.
 solver = UnconstrainedSolver(

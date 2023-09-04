@@ -15,6 +15,7 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
+import logging
 import math
 from types import NoneType
 from typing import Optional
@@ -44,6 +45,9 @@ from .space import (
 )         # pyright: ignore # noqa
 
 __all__ = ['LotkaObjectiveFunctional']
+
+
+logger = logging.getLogger(__name__)
 
 
 class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
@@ -340,6 +344,7 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
             # Reduce integration tolerances.
             atol *= self._valtol / (2 * val_err)
             self._inttol = (atol, rtol)
+            logger.debug(f"Retrying objective evaluation with tolerances {self._inttol}")
 
             traj_ctrl = []
             traj_fwd = []
@@ -509,6 +514,7 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
             self._val_result = None
             self.get_value()
             atol, rtol = self._inttol
+            logger.debug(f"Retrying gradient evaluation with tolerances {self._inttol}")
 
         # Once done, store trajectories.
         self._traj.adj = traj_adj

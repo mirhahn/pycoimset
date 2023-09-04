@@ -798,10 +798,11 @@ class PenaltySolver(Generic[Spc]):
         else:
             tau = max(eps, tau)
 
-        # Fall back to measure of universal set if full step appears
-        # empty.
-        if numpy.isclose(mu_full, 0.0):
-            mu_full = self.space.measure
+        # Approximate upper bound to full step measure.
+        mu_full_ub = self.space.measure
+        if norm is ErrorNorm.Linfty:
+            grad, grad_err = self._sol.pen_grad
+            mu_full_ub = (grad < grad_err).measure
 
         # Calculate lower bound for projected descent.
         expected_step_ratio = step_quality * min(
@@ -823,7 +824,7 @@ class PenaltySolver(Generic[Spc]):
             radius, xi_prdesc * proj_desc_min
         )
         grad_tol_full = norm.required_tolerance(
-            mu_full, xi_instat * max(tau - eps, eps)
+            mu_full_ub, xi_instat * max(tau - eps, eps)
         )
         grad_tol = min(grad_tol_step, grad_tol_full) / 2
 
@@ -950,7 +951,7 @@ class PenaltySolver(Generic[Spc]):
             if proj_chg_error > self._par.margin_proj_desc * abs(proj_chg):
                 val, _ = self._sol.val_err_tuple
                 obj_tol, grad_tol, step_tol, con_tol = self._tolerances(
-                    tau=tau, con=val[1:]
+                    tau=tau, con=val[1:], rho=proj_chg / step.measure
                 )
                 self._sol.val_tol = obj_tol
                 self._sol.grad_tol = grad_tol

@@ -34,6 +34,7 @@ from ..helpers import transform
 from ..logging import TabularLogger
 from ..typing import (
     Constraint,
+    ErrorNorm,
     Functional,
     Operator,
     SignedMeasure,
@@ -722,10 +723,11 @@ class BarrierSolver(Generic[Spc]):
             tau = self._sol.instationarity[0]
         tau = max(eps, tau)
 
-        # Fall back to measure of universal set if full step appears
-        # empty.
-        if numpy.isclose(mu_full, 0.0):
-            mu_full = self._sol.func.obj.input_space.measure
+        # Approximate upper bound to full step measure.
+        mu_full_ub = self._sol.func.obj.input_space.measure
+        if norm is ErrorNorm.Linfty:
+            grad, grad_err = self._sol.G
+            mu_full_ub = (grad < grad_err).measure
 
         # Calculate lower bound for projected descent.
         expected_step_ratio = step_quality * min(
@@ -744,7 +746,7 @@ class BarrierSolver(Generic[Spc]):
             radius, xi_prdesc * proj_desc_min
         )
         grad_tol_full = norm.required_tolerance(
-            mu_full, xi_instat * max(tau - eps, eps)
+            mu_full_ub, xi_instat * max(tau - eps, eps)
         )
         grad_tol = min(grad_tol_step, grad_tol_full) / 2
 
@@ -859,7 +861,7 @@ class BarrierSolver(Generic[Spc]):
             prchg = grad(step)
             prchg_err = err_norm.estimated_error(step.measure, grad_err)
             if prchg_err > self._par.margin_proj_desc * abs(prchg):
-                bar_tol, grad_tol, step_tol = self._errtol(tau, None)
+                bar_tol, grad_tol, step_tol = self._errtol(tau, prchg / step.measure)
                 self._sol.val_tol = bar_tol
                 self._sol.grad_tol = grad_tol
                 tau, tau_err = self._sol.instationarity
