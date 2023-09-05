@@ -85,7 +85,8 @@ parser.add_argument('-p', '--param', type=argparse.FileType('r'),
 parser.add_argument('-op', '--param-out', type=argparse.FileType('w'),
                     help='Write solver parameters to JSON file')
 parser.add_argument('-o', '--output', type=str,
-                    default='iterate_{i:04d}.json', help='')
+                    default='iterate_{i:04d}.json',
+                    help='Template for output paths')
 parser.add_argument('-v', '--verbose', type=int, nargs='?', const=1,
                     help='Write debugging output.')
 args = parser.parse_args()

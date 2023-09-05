@@ -110,6 +110,9 @@ parser.add_argument('-p', '--param', dest='parameters',
 parser.add_argument('-op', '--param-out', dest='parameter_output',
                     type=argparse.FileType('w'), help='Write combined JSON '
                     'file with problem and solver parameters.')
+parser.add_argument('-o', '--output', type=str,
+                    default='iterate_{idx:04d}.vtk',
+                    help='Template for output paths')
 parser.add_argument('-v', '--verbose', nargs='?', type=int, default=0,
                     help='Include debugging output (optional level).')
 args = parser.parse_args()
@@ -180,7 +183,7 @@ if sol_type == 'unconstrained':
             [1.0, 0.0]
         ),
         initial_sol=ctrl,
-        callback=Callback(),
+        callback=Callback(args.output),
         param=sol_param
     )
 elif sol_type == 'penalty':
@@ -193,7 +196,7 @@ elif sol_type == 'penalty':
         mu=prob_param.setdefault('mu_init', 0.01),
         err_wgt=[1.0, 0.0],
         param=sol_param,
-        callback=Callback()
+        callback=Callback(args.output)
     )
 else:
     raise ValueError(f'unknown solver type {sol_type}')

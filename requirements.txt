@@ -1,5 +1,1 @@
-# Requirements for the main PyCoimset library.
 numpy
-
-# Requirements for example problems.
--r examples/requirements.txt

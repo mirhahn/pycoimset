@@ -1,6 +1,6 @@
+../..
 matplotlib
 meshio[all]
 numpy
-pycoimset
 scipy
 scikit-fem[all]
