@@ -1,11 +1,11 @@
 {
     "abstol": 0.001,
     "thres_accept": 0.2,
-    "thres_reject": 0.4,
-    "thres_tr_expand": 0.6,
-    "margin_step": 0.01,
-    "margin_proj_desc": 0.5,
-    "margin_instat": 0.5,
+    "thres_reject": 0.3,
+    "thres_tr_expand": 0.9,
+    "margin_step": 0.5,
+    "margin_proj_desc": 0.05,
+    "margin_instat": 0.05,
     "tr_radius": null,
     "max_iter": null
 }

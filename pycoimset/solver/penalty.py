@@ -831,8 +831,8 @@ class PenaltySolver(Generic[Spc]):
         # Calculate objective error tolerance.
         sigma_0 = self._par.thres_accept
         sigma_1 = self._par.thres_reject
-        rho_tol = max(rho - sigma_0, sigma_1 - rho, (sigma_1 - sigma_0) / 4)
-        obj_tol = rho_tol * proj_desc_min / 2
+        rho_tol = max(rho - sigma_0, sigma_1 - rho)
+        obj_tol = rho_tol * proj_desc_min / 4
 
         # Calculate step tolerance.
         step_tol = xi_step * expected_step_ratio * tau
@@ -849,7 +849,7 @@ class PenaltySolver(Generic[Spc]):
                           ('grad_tol', grad_tol),
                           ('step_tol', step_tol),
                           ('con_tol', con_tol)):
-            if isinstance(val, float):
+            if isinstance(val, (float, int)):
                 logger.getChild('tolerances').debug(f'{name} = {val:.3e}')
             elif isinstance(val, numpy.ndarray):
                 val = numpy.array2string(val, precision=3, floatmode='fixed')

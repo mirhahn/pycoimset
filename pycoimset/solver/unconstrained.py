@@ -511,8 +511,8 @@ class Solver(Generic[Spc]):
         # Calculate objective error tolerance.
         sigma_0 = self.param.thres_accept
         sigma_1 = self.param.thres_reject
-        rho_tol = max(rho - sigma_0, sigma_1 - rho, (sigma_1 - sigma_0) / 4)
-        obj_tol = rho_tol * proj_desc_min / 2
+        rho_tol = max(rho - sigma_0, sigma_1 - rho)
+        obj_tol = rho_tol * proj_desc_min / 4
 
         # Calculate step tolerance.
         step_tol = xi_step * expected_step_ratio * tau
