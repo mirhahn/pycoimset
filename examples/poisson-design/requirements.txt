@@ -1,6 +1,0 @@
-../..
-matplotlib
-meshio[all]
-numpy
-scipy
-scikit-fem[all]

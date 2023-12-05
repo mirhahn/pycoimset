@@ -1,7 +1,7 @@
 [project]
-name = "pycoimset"
+name = "pycoimset-ex-poisson-design"
 version = "0.1.1"
-description = "Python library for set-valued optimization"
+description = "Poisson Topology Optimization problem for PyCoimset."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE.md" }
@@ -12,15 +12,10 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-  'numpy>=1.24.2'
+    "pycoimset==0.1.1",
+    "matplotlib",
+    "meshio[all]",
+    "numpy",
+    "scipy",
+    "scikit-fem[all]"
 ]
-
-[project.optional-dependencies]
-lotka = [
-  'numpy',
-  'scipy==1.10.1',
-  'sortednp'
-]
-
-[build-system]
-requires = ["setuptools", "wheel", "setuptools_scm[toml]>=6.2"]
