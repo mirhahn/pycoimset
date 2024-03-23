@@ -1,6 +1,6 @@
 [project]
 name = "pycoimset"
-version = "0.1.1"
+version = "0.1.2"
 description = "Python library for set-valued optimization"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,13 +13,6 @@ classifiers = [
 ]
 dependencies = [
   'numpy>=1.24.2'
-]
-
-[project.optional-dependencies]
-lotka = [
-  'numpy',
-  'scipy==1.10.1',
-  'sortednp'
 ]
 
 [build-system]

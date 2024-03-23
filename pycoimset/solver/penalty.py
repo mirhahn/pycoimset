@@ -427,7 +427,7 @@ class PenaltySolution(Generic[Spc]):
                         break
 
                     # Adjust actual tolerance.
-                    etol = numpy.sqrt((abs(v) / 2)**2 + 2 * tol / self.mu) - abs(v) / 2
+                    etol = 0.9 * (numpy.sqrt(abs(v)**2 + 2 * tol / self.mu) - abs(v))
                     while (self.mu / 2) * (abs(v) + etol) * etol > tol:
                         etol *= 0.9
 
