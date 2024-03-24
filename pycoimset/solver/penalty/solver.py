@@ -30,11 +30,11 @@ import numpy
 from numpy import dtype, float_
 from numpy.typing import ArrayLike, NDArray
 
-from .unconstrained import SolverParameters
-from ..logging import TabularLogger
-from ..helpers import transform
-from ..step import SteepestDescentStepFinder
-from ..typing import (
+from ..unconstrained.solver import SolverParameters
+from ...logging import TabularLogger
+from ...helpers import transform
+from ...step import SteepestDescentStepFinder
+from ...typing import (
     Constraint,
     ErrorNorm,
     Functional,
@@ -45,7 +45,7 @@ from ..typing import (
     SimilaritySpace,
     UnconstrainedStepFinder,
 )
-from ..util import depends_on, notify_property_update, tracks_dependencies
+from ...util import depends_on, notify_property_update, tracks_dependencies
 
 
 __all__ = ['PenaltySolver']

@@ -1,3 +1,18 @@
+# PyCoimset: Python library for COntinuous IMprovement of SETs
+#
+# Copyright 2023 Mirko Hahn
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 '''
 Generic controlled evaluation loop.
 '''
@@ -5,40 +20,35 @@ Generic controlled evaluation loop.
 
 from collections.abc import Callable
 import math
-from typing import TypeVar, TypeVarTuple, cast
+from typing import TypeVar
 
 
 _T = TypeVar('_T')
-_P = TypeVarTuple('_P')
 
 
 def controlled_eval(
-    eval_func: Callable[[float, *_P], tuple[_T, float]],
-    param_func: Callable[[_T, *_P], tuple[float, tuple[*_P]]],
-    *param_init: *_P,
+    eval_func: Callable[[float], tuple[_T, float]],
+    param_func: Callable[[_T], float],
+    *,
     err_bnd: float = math.inf,
     err_decay: float = 0.5
-) -> tuple[_T, float, *_P]:
+) -> tuple[_T, float]:
     '''
     Controlled evaluation loop.
 
     Arguments
     ---------
-    eval_func : (float, *P) -> (T, float)
+    eval_func : (float) -> (T, float)
         Evaluation function. Accepts error bound and parameters and returns
         evaluate and error estimator. Error bound may be infinite. Error
         estimator must be finite and no larger than error bound.
 
-    param_func : (T, *P) -> (float, *P)
+    param_func : (T) -> (float)
         Parameter update function. Accepts evaluate and parameters and returns
         new error bound and new parameters. There must be a guarantee that
         for evaluates with an error estimate below a fixed, strictly positive
         threshold, then the new error bound remains above the error estimate
         and the parameters remain unchanged.
-
-    param_init : *P
-        Additional variadic arguments to be used as initial parameters for the
-        evaluator and update function.
 
     err_bnd : float (optional, keyword-only)
         Initial error bound. Must be strictly positive. Can be infinite to
@@ -57,9 +67,6 @@ def controlled_eval(
     e : float
         Error estimate. Must be non-negative and finite.
 
-    p : *P
-        Additional parameters.
-
     Raises
     ------
     ValueError
@@ -72,18 +79,16 @@ def controlled_eval(
         raise ValueError('Error decay rate must be strictly between 0.0 and 1.0.')
 
     # Initial evaluation
-    param = param_init
-    val, err = eval_func(err_bnd, *param)
-    next_bnd, next_param = param_func(val, *param)
+    val, err = eval_func(err_bnd)
+    next_bnd = param_func(val)
 
     # Improvement loop
-    while err > next_bnd or param != next_param:
+    while err > next_bnd:
         # FIXME: This cast should not be necessary. Type checker does weird
         # stuff here.
-        param = cast(tuple[*_P], next_param)
         err_bnd = min(err_bnd, err_decay * next_bnd)
-        val, err = eval_func(err_bnd, *param)
-        next_bnd, next_param = param_func(val, *param)
+        val, err = eval_func(err_bnd)
+        next_bnd = param_func(val)
 
     # Return results
-    return val, err, *param
+    return val, err

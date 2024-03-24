@@ -17,8 +17,46 @@
 Helpers to intercept and defer user interruption signals.
 '''
 
+from collections.abc import Callable
 import contextlib
+from dataclasses import dataclass
 import signal
+from typing import Concatenate, ParamSpec, TypeVar
+
+
+P = ParamSpec('P')
+T = TypeVar('T')
+R = TypeVar('R')
+
+
+@dataclass
+class InterruptionFlag:
+    deferred_signal: int | None = None
+
+
+def interruptible_method(signals: int) -> Callable[
+    [Callable[Concatenate[T, InterruptionFlag, P], R]],
+    Callable[Concatenate[T, P], R]
+]:
+    def decorator(func: Callable[Concatenate[T, InterruptionFlag, P], R]
+                  ) -> Callable[Concatenate[T, P], R]:
+        def wrapped_func(self, *args: P.args, **kwargs: P.kwargs) -> R:
+            # Install signal handler
+            flag = InterruptionFlag()
+            def handler(signum: int, _):
+                flag.deferred_signal = signum
+            hdl = signal.signal(signals, handler)
+
+            # Execute wrapped function, reset signal handler, reraise signal.
+            try:
+                return func(self, flag, *args, **kwargs)
+            finally:
+                signal.signal(signals, hdl)
+                if (sig := flag.deferred_signal) is not None:
+                    signal.raise_signal(sig)
+        return wrapped_func
+    return decorator
+
 
 
 __interrupt: bool = False
