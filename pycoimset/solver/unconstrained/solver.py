@@ -468,6 +468,8 @@ class UnconstrainedSolver(Generic[Spc]):
                 self._stats.last_obj_val = obj_val
                 self._stats.last_instat = instat
                 old_reject = self._stats.n_reject
+                if self.callback is not None:
+                    self.callback(self)
 
         if int_flag.deferred_signal is not None:
             self._status = SolverStatus.UserInterruption

@@ -15,7 +15,7 @@
 # limitations under the License.
 '''Measure space implementation for the Poisson problem.'''
 
-from functools import cached_property, singledispatchmethod
+from functools import cached_property
 import logging
 import math
 import operator
@@ -23,9 +23,10 @@ from types import NotImplementedType
 from typing import Generic, Optional, Protocol, Self, TypeVar, cast
 
 import numpy
-from numpy import bool_, float_
+from numpy import bool_, float_, int_
 from numpy.typing import ArrayLike, NDArray
 import pycoimset.typing
+from pycoimset.typing.space import SimilarityClass
 import pycoimset.util.weakref as weakref
 import skfem
 
@@ -46,7 +47,7 @@ logger = logging.getLogger(__name__)
 M = TypeVar('M', bound=skfem.MeshTri1)
 
 
-def solve_subset_sum(weight: NDArray[float_], bnd: float, eps: float) -> NDArray[float_]:
+def solve_subset_sum(weight: NDArray[float_], bnd: float, eps: float) -> NDArray[int_]:
     '''
     Approximately solve subset sum problem using dynamic programming.
     '''
@@ -54,24 +55,24 @@ def solve_subset_sum(weight: NDArray[float_], bnd: float, eps: float) -> NDArray
 
     eps = min(eps, float(numpy.min(weight[weight > 0])))
 
-    l: list[tuple[float, list[int]]] = [(0, [])]
+    lst: list[tuple[float, list[int]]] = [(0, [])]
     for i, w in enumerate(weight):
-        u = sorted(l + [(y + w, p + [i]) for y, p in l], key=(lambda el: el[0]))    # type: ignore
+        u = sorted(lst + [(y + w, p + [i]) for y, p in lst], key=(lambda el: el[0]))    # type: ignore
         y, p = u[0]
-        l = [(y, p)]
+        lst = [(y, p)]
         for z, p in u[1:]:
             if y + eps * bnd / len(weight) < z and z <= bnd:
-                l.append((z, p))
+                lst.append((z, p))
                 y = z
-    l = sorted(l, key=lambda el: el[0])
-    _, p = l[-1]
+    lst = sorted(lst, key=lambda el: el[0])
+    _, p = lst[-1]
     return numpy.array(p, dtype=int)
 
 
 class Mesh(Generic[M]):
     mesh: M
-    _parent: Optional[weakref.ref[Self]]
-    _children: set[weakref.ref[Self]]
+    _parent: Optional[weakref.ref['Mesh[M]']]
+    _children: set[weakref.ref['Mesh[M]']]
     _elmap: dict[weakref.ref[M], numpy.ndarray]
 
     def __init__(self, mesh: M, parent: Optional[Self] = None):
@@ -82,7 +83,7 @@ class Mesh(Generic[M]):
         self.parent = parent
 
     @property
-    def parent(self) -> Optional[Self]:
+    def parent(self) -> Optional['Mesh[M]']:
         '''Parent of a refined mesh.'''
         if self._parent is None:
             return None
@@ -236,30 +237,25 @@ class SimilaritySpace(pycoimset.typing.SimilaritySpace):
         '''Measure of the universal similarity class.'''
         return self.mesh.measure
 
-    @cached_property
-    def empty_class(self) -> pycoimset.typing.SimilarityClass[Self]:
+    @property
+    def empty_class(self) -> 'BoolArrayClass':
         '''Empty similarity class.'''
         return BoolArrayClass(self, self._mesh, False)
 
-    @cached_property
-    def universal_class(self) -> pycoimset.typing.SimilarityClass[Self]:
+    @property
+    def universal_class(self) -> 'BoolArrayClass':
         '''Universal similarity class.'''
         return BoolArrayClass(self, self._mesh, True)
 
 
-class SimilarityClass(pycoimset.typing.SimilarityClass[SimilaritySpace],
-                      MeshDependent, Protocol):
-    pass
-
-
-class BoolArrayClass(SimilarityClass):
+class BoolArrayClass(SimilarityClass[SimilaritySpace], MeshDependent):
     '''
     Encodes a similarity class with an array of booleans.
     '''
     _space: SimilaritySpace
     _mesh: Mesh
     _flag: numpy.ndarray
-    _ref: dict[weakref.ref[Mesh], Self]
+    _ref: dict[weakref.ref[Mesh], 'BoolArrayClass']
 
     def __init__(self, space: SimilaritySpace, mesh: Optional[Mesh] = None,
                  flag: ArrayLike = False):
@@ -271,9 +267,9 @@ class BoolArrayClass(SimilarityClass):
             numpy.asarray(flag, dtype=bool),
             mesh.mesh.nelements
         )
-        self._ref = dict[weakref.ref[Mesh], Self]()
+        self._ref = dict[weakref.ref[Mesh], BoolArrayClass]()
 
-    def adapt(self, mesh: Mesh) -> Self:
+    def adapt(self, mesh: Mesh) -> 'BoolArrayClass':
         '''Adapt to a refined mesh.'''
         if mesh is self.mesh:
             return self
@@ -304,7 +300,7 @@ class BoolArrayClass(SimilarityClass):
         '''Boolean array indicating set membership for each mesh element.'''
         return self._flag
 
-    @cached_property
+    @property
     def measure(self) -> float:
         return self.mesh.element_measure[self.flag].sum()
 
@@ -471,7 +467,7 @@ class BoolArrayClass(SimilarityClass):
         #return self._subset_hint(meas_low, meas_high, hint)
         return self._subset_nohint(meas_low, meas_high)
 
-    def __invert__(self) -> Self:
+    def __invert__(self) -> 'BoolArrayClass':
         '''Complement of the similarity class.'''
         return BoolArrayClass(self.space, self.mesh, ~self.flag)
 
@@ -515,14 +511,14 @@ class SignedMeasure(pycoimset.typing.SignedMeasure, MeshDependent):
     _space: SimilaritySpace
     _mesh: Mesh
     _dof: numpy.ndarray
-    _ref: dict[weakref.ref[Mesh], Self]
+    _ref: dict[weakref.ref[Mesh], 'SignedMeasure']
 
     def __init__(self, space: SimilaritySpace, mesh: Mesh,
                  value: ArrayLike = 0.0):
         self._space = space
         self._mesh = mesh
         self._dof = numpy.broadcast_to(value, self.mesh.p0_basis.N)
-        self._ref = dict[weakref.ref[Mesh], Self]()
+        self._ref = dict[weakref.ref[Mesh], SignedMeasure]()
 
     @property
     def space(self) -> SimilaritySpace:
@@ -565,6 +561,12 @@ class SignedMeasure(pycoimset.typing.SignedMeasure, MeshDependent):
             ] = retval
             return retval
 
+    @property
+    def linfty_norm(self) -> float:
+        # NOTE: This is grossly oversimplified and only works if the DOFs are
+        # pointwise values.
+        return abs(self.dof).max()
+
     @cached_property
     def elemental_integrals(self) -> numpy.ndarray:
         '''Elemental integrals of the density function.'''
@@ -573,13 +575,11 @@ class SignedMeasure(pycoimset.typing.SignedMeasure, MeshDependent):
             p0, g=p0.interpolate(self.dof)
         )
 
-    @singledispatchmethod
-    def __call__(self, simcls: SimilarityClass) -> float:
+    def __call__(self, simcls: pycoimset.SimilarityClass[SimilaritySpace]) -> float:
         '''Return measure of a similarity class.'''
-        raise NotImplementedError(f'Cannot measure {type(simcls).__name__}')
+        if not isinstance(simcls, BoolArrayClass):
+            raise NotImplementedError(f'Cannot measure {type(simcls).__name__}')
 
-    @__call__.register
-    def _(self, simcls: BoolArrayClass) -> float:
         # Ensure that both objects share a similarity space.
         if self.space is not simcls.space:
             raise NotImplementedError('Similarity class and signed measure '
@@ -593,7 +593,7 @@ class SignedMeasure(pycoimset.typing.SignedMeasure, MeshDependent):
         # Calculate integral by summing elemental integrals.
         return self.elemental_integrals[simcls.flag].sum()
 
-    def _cmp(self, op, other: float | Self) -> BoolArrayClass:
+    def _cmp(self, op, other: 'float | SignedMeasure') -> BoolArrayClass:
         '''Perform generic comparison operation to obtain similarity class.'''
         # NOTE: Presumes that DOFs of P0 are elemental function values
         # in element index order.
@@ -608,7 +608,7 @@ class SignedMeasure(pycoimset.typing.SignedMeasure, MeshDependent):
             other_dof = other
         return BoolArrayClass(self.space, self.mesh, op(self.dof, other_dof))
 
-    def _arith(self, op, *args: float | Self) -> Self:
+    def _arith(self, op, *args: 'float | SignedMeasure') -> 'SignedMeasure':
         '''Perform generic arithmetic operation to obtain signed measure.'''
         # NOTE: Presumes that DOFs of P0 are elemental function values
         # in case of nonlinear operations.
@@ -652,31 +652,31 @@ class SignedMeasure(pycoimset.typing.SignedMeasure, MeshDependent):
         '''Superlevel set.'''
         return self._cmp(operator.ge, other)
 
-    def __add__(self, other) -> Self | NotImplementedType:
+    def __add__(self, other) -> 'SignedMeasure | NotImplementedType':
         '''Add measures or shift density function.'''
         if not isinstance(other, (float, int, SignedMeasure)):
             return NotImplemented
         return self._arith(operator.add, other)
 
-    def __sub__(self, other) -> Self | NotImplementedType:
+    def __sub__(self, other) -> 'SignedMeasure | NotImplementedType':
         '''Subtract measures or shift density function.'''
         if not isinstance(other, (float, int, SignedMeasure)):
             return NotImplemented
         return self._arith(operator.sub, other)
 
-    def __rsub__(self, other) -> Self | NotImplementedType:
+    def __rsub__(self, other) -> 'SignedMeasure | NotImplementedType':
         '''Subtract measures or shift density function.'''
         if not isinstance(other, (float, int, SignedMeasure)):
             return NotImplemented
         return self._arith(lambda x, y: y - x, other)
 
-    def __mul__(self, other) -> Self | NotImplementedType:
+    def __mul__(self, other) -> 'SignedMeasure | NotImplementedType':
         '''Scale measure or multiply density functions.'''
         if not isinstance(other, (float, int, SignedMeasure)):
             return NotImplemented
         return self._arith(operator.mul, other)
 
-    def __truediv__(self, other) -> Self | NotImplementedType:
+    def __truediv__(self, other) -> 'SignedMeasure | NotImplementedType':
         '''Scale measure or multiply density functions.'''
         if not isinstance(other, (float, int, SignedMeasure)):
             return NotImplemented

@@ -249,14 +249,12 @@ class PolynomialTrajectory(OdeSolutionLike):
         '''
         Real roots of each polynomial.
 
-        This only works for polynomials up to degree 4 and uses
-        Ferrari's method with an added Newton step for refinement. The
-        output array always has shape `(..., d)` where `...` is the
+        The output array always has shape `(..., d)` where `...` is the
         shape of the polynomial array and `d` is the maximal degree of
         a polynomial in this trajectory.
 
         Since not every polynomial has `d` real roots, the remaining
-        roots are replaced with `numpy.inf`.
+        roots are replaced with `fill`.
         '''
         # Construct an empty output array.
         root = numpy.empty((*self.coef.shape[:-1], self.coef.shape[-1] - 1),

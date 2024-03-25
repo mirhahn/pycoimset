@@ -19,13 +19,18 @@ Implementation of a similarity class.
 
 import copy
 from types import NotImplementedType
-from typing import Callable, Optional, Self, assert_type, cast, overload
+from typing import Callable, Optional, assert_type, cast, overload
 
 import numpy
 from numpy.typing import ArrayLike
 import sortednp
 
-from pycoimset.typing import SignedMeasure, SimilarityClass, SimilaritySpace, JSONSerializable
+from pycoimset.typing import (
+    JSONSerializable,
+    SignedMeasure,
+    SimilarityClass,
+    SimilaritySpace,
+)
 
 from .polyfit import PolynomialTrajectory
 
@@ -131,7 +136,7 @@ def join_polynomial_splines(ta: ArrayLike, pa: ArrayLike, tb: ArrayLike,
     return t, pa_out, pb_out
 
 
-class IntervalSimilaritySpace(SimilaritySpace['IntervalSimilaritySpace'],
+class IntervalSimilaritySpace(SimilaritySpace,
                               JSONSerializable):
     time_range: tuple[float, float]
 
@@ -284,6 +289,7 @@ class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace],
                   - self.switch_times[:-1:2])
         if measure < 0:
             raise RuntimeError()
+        setattr(self, 'measure', measure)
         return measure
 
     def __copy__(self) -> 'IntervalSimilarityClass':
@@ -320,7 +326,7 @@ class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace],
             self._space, numpy.concatenate((head, tail))
         )
 
-    def __invert__(self) -> Self:
+    def __invert__(self) -> 'IntervalSimilarityClass':
         '''Return complement of this class.'''
         # Complement is formed by adding the start and end times of the
         # universal time interval to the switching time vector.
@@ -342,7 +348,7 @@ class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace],
 
         return IntervalSimilarityClass(self._space, switch_times)
 
-    def __or__(self, other: SimilarityClass) -> Self | NotImplementedType:
+    def __or__(self, other: SimilarityClass) -> 'IntervalSimilarityClass | NotImplementedType':
         '''Return union with another similarity class.'''
         if not isinstance(other, IntervalSimilarityClass):
             return NotImplemented
@@ -384,7 +390,7 @@ class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace],
 
         return IntervalSimilarityClass(self._space, switch_times)
 
-    def __and__(self, other: SimilarityClass) -> Self | NotImplementedType:
+    def __and__(self, other: SimilarityClass) -> 'IntervalSimilarityClass | NotImplementedType':
         if not isinstance(other, IntervalSimilarityClass):
             return NotImplemented
         if other.space is not self.space:
@@ -392,7 +398,7 @@ class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace],
 
         return ~(~self | ~other)
 
-    def __sub__(self, other: SimilarityClass) -> Self | NotImplementedType:
+    def __sub__(self, other: SimilarityClass) -> 'IntervalSimilarityClass | NotImplementedType':
         if not isinstance(other, IntervalSimilarityClass):
             return NotImplemented
         if other.space is not self.space:
@@ -400,12 +406,12 @@ class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace],
 
         return self & ~other
 
-    def __rsub__(self, other: SimilarityClass) -> Self | NotImplementedType:
+    def __rsub__(self, other: SimilarityClass) -> 'IntervalSimilarityClass | NotImplementedType':
         if not isinstance(other, IntervalSimilarityClass):
             return NotImplemented
         return other.__sub__(self)
 
-    def __xor__(self, other: SimilarityClass) -> Self | NotImplementedType:
+    def __xor__(self, other: SimilarityClass) -> 'IntervalSimilarityClass | NotImplementedType':
         if not isinstance(other, IntervalSimilarityClass):
             return NotImplemented
         if other.space is not self.space:
@@ -488,6 +494,27 @@ class PolynomialSignedMeasure(SignedMeasure[IntervalSimilaritySpace]):
     def space(self) -> IntervalSimilaritySpace:
         '''Underlying similarity space.'''
         return self._space
+
+    @property
+    def linfty_norm(self) -> float:
+        # Find roots of derivative trajectory.
+        deriv_traj = (traj := self._poly).poly_deriv()
+        roots = deriv_traj.roots(fill=numpy.nan)
+
+        # Find start and end times of each window.
+        start_times = traj.ts[0:-1:2]
+        end_times = traj.ts[1::2]
+
+        # Erase all roots outside the interval
+        roots[roots <= start_times[:, None]] = numpy.nan
+        roots[roots >= end_times[:, None]] = numpy.nan
+        roots = numpy.concatenate((start_times[:, None], roots, end_times[:, None]), axis=-1)
+
+        # Evaluate polynomials at points
+        val = numpy.abs(traj.piece_eval(roots))
+        norm = val[~numpy.isnan(val)].max()
+        setattr(self, 'linfty_norm', norm)
+        return norm
 
     @property
     def polynomial_trajectory(self) -> PolynomialTrajectory:
@@ -585,35 +612,35 @@ class PolynomialSignedMeasure(SignedMeasure[IntervalSimilaritySpace]):
     def __ge__(self, level: float) -> IntervalSimilarityClass:
         return self.__levelset(numpy.greater_equal, level)
 
-    def __mul__(self, factor: float) -> Self:
+    def __mul__(self, factor: float) -> 'PolynomialSignedMeasure':
         return PolynomialSignedMeasure(self._space, self._poly * factor)
 
-    def __rmul__(self, factor: float) -> Self:
+    def __rmul__(self, factor: float) -> 'PolynomialSignedMeasure':
         return PolynomialSignedMeasure(self._space, self._poly * factor)
 
-    def __truediv__(self, divisor: float) -> Self:
+    def __truediv__(self, divisor: float) -> 'PolynomialSignedMeasure':
         return PolynomialSignedMeasure(self._space, self._poly / divisor)
 
-    def __add__(self, other: SignedMeasure) -> Self | NotImplementedType:
+    def __add__(self, other: SignedMeasure) -> 'PolynomialSignedMeasure | NotImplementedType':
         if not isinstance(other, PolynomialSignedMeasure):
             return NotImplemented
         if other._space is not self._space:
             raise ValueError('Similarity space mismatch')
         return PolynomialSignedMeasure(self._space, self._poly + other._poly)
 
-    def __radd__(self, other: SignedMeasure) -> Self | NotImplementedType:
+    def __radd__(self, other: SignedMeasure) -> 'PolynomialSignedMeasure | NotImplementedType':
         if not isinstance(other, PolynomialSignedMeasure):
             return NotImplemented
         return self.__add__(other)
 
-    def __sub__(self, other: SignedMeasure) -> Self | NotImplementedType:
+    def __sub__(self, other: SignedMeasure) -> 'PolynomialSignedMeasure | NotImplementedType':
         if not isinstance(other, PolynomialSignedMeasure):
             return NotImplemented
         if other._space is not self._space:
             raise ValueError('Similarity space mismatch')
         return PolynomialSignedMeasure(self._space, self._poly - other._poly)
 
-    def __rsub__(self, other: SignedMeasure) -> Self | NotImplementedType:
+    def __rsub__(self, other: SignedMeasure) -> 'PolynomialSignedMeasure | NotImplementedType':
         if not isinstance(other, PolynomialSignedMeasure):
             return NotImplemented
         return other.__sub__(self)

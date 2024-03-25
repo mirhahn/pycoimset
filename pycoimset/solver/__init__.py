@@ -18,10 +18,6 @@ Solver implementations.
 
 Classes
 -------
-BarrierSolver
-    Experimental, untested trust-region log-barrier method for
-    inequality-constrained methods. Always yields interior points.
-
 PenaltySolver
     Naive trust-region penalty method for constrained problems.
     Generally yields non-interior points.
@@ -30,12 +26,10 @@ UnconstrainedSolver
     Simple trust-region steepest descent method for unconstrained
     problems.
 """
-#from .barrier import BarrierSolver
-#from .penalty import PenaltySolver
+from .penalty import PenaltySolver
 from .unconstrained import UnconstrainedSolver
 
 __all__ = [
-#    'BarrierSolver',
-#    'PenaltySolver',
+    'PenaltySolver',
     'UnconstrainedSolver',
 ]

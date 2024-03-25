@@ -18,7 +18,10 @@ Static typing protocols for similarity space definition.
 '''
 
 from types import NotImplementedType
-from typing import Optional, Protocol, TypeVar
+from typing import Literal, Optional, Protocol, Self, TypeVar, final
+
+
+from ..util.cache import cached_method
 
 
 __all__ = [
@@ -110,10 +113,67 @@ class SignedMeasure(Protocol[Spc]):
     Like :class:`SimilarityClass`, this may be used to represent a
     vector of signed measures.
     '''
+
+
     @property
     def space(self) -> Spc:
         '''Underlying measure space.'''
         ...
+
+    @property
+    def l1_norm(self) -> float:
+        '''
+        Calculate total variation norm.
+
+        Notes
+        -----
+            This property is generally not cached. You should use `norm`
+            instead.
+        '''
+        return self(self > 0) - self(self < 0)
+
+    @property
+    def linfty_norm(self) -> float:
+        '''
+        Calculate essential supremum of absolute density.
+
+        Notes
+        -----
+            This property is generally not cached. You should use `norm`
+            instead.
+        '''
+        raise NotImplementedError('Linfty norm has not been implemented.')
+
+    @final
+    @cached_method('_cache_norm')
+    def norm(self, kind: Literal['L1', 'Linfty']) -> float:
+        '''
+        Calculate an Lq norm of the density function.
+
+        This is a mixin method. You cannot override it. It uses caching with
+        no lifetime limit. Therefore, it requires the signed measure to be
+        immutable.
+
+        Argument
+        --------
+        kind : 'L1' or 'Linfty'
+            Indicates which norm to use. Only 'L1' is guaranteed to be
+            implemented.
+
+        Returns
+        -------
+            Value of the norm.
+
+        Raises
+        ------
+        NotImplementedError
+            Indicates that the norm has not been implemented for the signed
+            measure type.
+        '''
+        if kind == 'Linfty':
+            return self.linfty_norm
+        else:
+            return self.l1_norm
 
     def __call__(self, arg: SimilarityClass[Spc]) -> float:
         '''Measure a given set.'''
@@ -176,7 +236,7 @@ class SignedMeasure(Protocol[Spc]):
         return self.__mul__(-1)
 
 
-class SimilaritySpace(Protocol[Spc]):
+class SimilaritySpace(Protocol):
     '''
     Protocol for the underlying metric space of a :class:`SimilarityClass`.
 
@@ -188,11 +248,11 @@ class SimilaritySpace(Protocol[Spc]):
         ...
 
     @property
-    def empty_class(self) -> SimilarityClass[Spc]:
+    def empty_class(self) -> SimilarityClass[Self]:
         '''Empty similarity class.'''
         ...
 
     @property
-    def universal_class(self) -> SimilarityClass[Spc]:
+    def universal_class(self) -> SimilarityClass[Self]:
         '''Universal similarity class.'''
         ...

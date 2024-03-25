@@ -22,15 +22,37 @@ from collections.abc import Callable
 import math
 from types import NotImplementedType
 from typing import TypeVar, assert_never
-from weakref import ref
 
 from ...typing.functional import ErrorNorm, Functional
 from ...typing.space import SignedMeasure, SimilarityClass, SimilaritySpace
-from ...util.cache import LRUCache
+from ...util.cache import cached_external_property, error_control_cache
 from ...util.controlled_eval import controlled_eval
 
 
 _Tspc = TypeVar('_Tspc', bound=SimilaritySpace)
+
+
+def eval_instat(_: _Tspc, cache_size: int | None = 1
+                ) -> Callable[[SignedMeasure[_Tspc]], tuple[SimilarityClass[_Tspc], float]]:
+    '''
+    Cached instationarity evaluator.
+
+    Arguments
+    ---------
+    cache_size : int
+        Maximal cache size. `None` indicates indefinite cache. Defaults to
+        `1`.
+
+    Returns
+    -------
+    SignedMeasure[S] -> (SimilarityClas[S], float)
+        Callable that evaluates the strict sublevel set for level `0` and
+        instationarity according to a given gradient measure.
+    '''
+    def inner_evaluator(grad: SignedMeasure[_Tspc]
+                        ) -> tuple[SimilarityClass[_Tspc], float]:
+        return (set_neg := grad < 0), abs(grad(set_neg))
+    return cached_external_property(cache_size)(inner_evaluator)
 
 
 def make_func_eval(func: Functional[_Tspc], *, cache_size: int = 2
@@ -61,30 +83,7 @@ def make_func_eval(func: Functional[_Tspc], *, cache_size: int = 2
             func.arg = arg
             func.val_tol = err_bnd
         return func.get_value()
-
-    if cache_size <= 0:
-        return simple_eval
-
-    cache = LRUCache[ref[SimilarityClass[_Tspc]], tuple[float, float]](max_size=cache_size)
-    def wipe_cache(key: ref[SimilarityClass[_Tspc]]):
-        try:
-            del cache[key]
-        except KeyError:
-            pass
-    def cache_eval(arg: SimilarityClass[_Tspc], err_bnd: float) -> tuple[float, float]:
-        # Try to retrieve a cached value.
-        try:
-            val, err = cache[ref(arg)]
-            if err <= err_bnd:
-                return val, err
-        except KeyError:
-            pass
-
-        # Perform bare evaluation and return the result.
-        val, err = simple_eval(arg, err_bnd)
-        cache[ref(arg, wipe_cache)] = (val, err)
-        return val, err
-    return cache_eval
+    return error_control_cache(simple_eval, cache_size=cache_size)
 
 
 def make_grad_eval(
@@ -119,25 +118,7 @@ def make_grad_eval(
             func.arg = arg
             func.grad_tol = err_bnd
         return func.get_gradient()
-
-    if cache_size <= 0:
-        return simple_eval
-
-    cache = LRUCache[ref[SimilarityClass[_Tspc]], tuple[SignedMeasure[_Tspc], float]](max_size=cache_size)
-    def cache_eval(arg: SimilarityClass[_Tspc], err_bnd: float) -> tuple[SignedMeasure[_Tspc], float]:
-        # Try to retrieve a cached value.
-        try:
-            val, err = cache[ref(arg)]
-            if err <= err_bnd:
-                return val, err
-        except KeyError:
-            pass
-
-        # Perform bare evaluation and return the result.
-        val, err = simple_eval(arg, err_bnd)
-        cache[ref(arg)] = (val, err)
-        return val, err
-    return cache_eval
+    return error_control_cache(simple_eval, cache_size=cache_size)
 
 
 def eval_rho(eval_func: Callable[
@@ -270,7 +251,11 @@ def eval_grad(
     err_norm: ErrorNorm,
     *,
     err_bnd: float,
-    err_decay: float
+    err_decay: float,
+    instat_eval: Callable[
+        [SignedMeasure[_Tspc]],
+        tuple[SimilarityClass[_Tspc], float]
+    ] | None = None
 ) -> tuple[SignedMeasure[_Tspc], SimilarityClass[_Tspc], float, float]:
     '''
     Evaluate gradient.
@@ -317,6 +302,10 @@ def eval_grad(
         Decay rate for the controlled evaluation loop. Must be strictly
         between `0` and `1`.
 
+    instat_eval : SignedMeasure[S] -> float (optional, keyword-only)
+        Optional instationarity evaluator. Can be used to carry cached
+        instationarity to the caller.
+
     Returns
     -------
     g : SignedMeasure[T]
@@ -336,10 +325,14 @@ def eval_grad(
     e : float
         Upper bound on the gradient error with respect to the control norm.
     '''
+    # Set up instationarity evaluator
+    if instat_eval is None:
+        instat_eval = eval_instat(set_cur.space)
+
     # Inner evaluator
     def phi(beta: float) -> tuple[tuple[SignedMeasure[_Tspc], SimilarityClass[_Tspc], float, float], float]:
         g, e = grad(set_cur, beta)
-        tau = abs(g(set_neg := g < 0))
+        set_neg, tau = instat_eval(g)
         return (g, set_neg, tau, e), e
 
     # Bound oracle

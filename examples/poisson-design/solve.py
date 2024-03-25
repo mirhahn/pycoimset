@@ -25,50 +25,36 @@ import argparse
 import json
 import logging
 import sys
-from typing import cast
 import warnings
 
 import meshio
 import numpy
-from pycoimset import PenaltySolver, UnconstrainedSolver
-from pycoimset.helpers import with_safety_factor
 import skfem
 
 from functionals import MeasureFunctional, ObjectiveFunctional
+from pycoimset import PenaltySolver, UnconstrainedSolver
+from pycoimset.helpers import with_safety_factor
 from pycoimset.helpers.functionals import weighted_sum
-from pycoimset.solver.unconstrained import SolverParameters
+from pycoimset.solver.unconstrained.solver import SolverParameters
 from space import BoolArrayClass, SimilaritySpace
 
 
 # Callback for solution recording.
 class Callback:
     _tmpl: str
+    obj_func: ObjectiveFunctional
 
-    def __init__(self, file: str = 'iterate_{idx:04d}.vtk'):
+    def __init__(self, func: ObjectiveFunctional, file: str = 'iterate_{idx:04d}.vtk'):
         self._tmpl = file
+        self.obj_func = func
 
     def __call__(self, solver: PenaltySolver | UnconstrainedSolver):
         # Extract solution and objective functional.
-        if isinstance(solver, PenaltySolver):
-            obj_func = solver.objective_functional
-            sol = solver.solution
-        else:
-            obj_func = solver.objective
-            sol = solver.solution.arg
-
-        # Retrieve solution.
+        sol = solver.x
         if not isinstance(sol, BoolArrayClass):
             return
-
-        # Retrieve objective functional.
-        while not isinstance(obj_func, ObjectiveFunctional):
-            if isinstance(obj_func, with_safety_factor):
-                obj_func = obj_func.base_functional
-            elif isinstance(obj_func, weighted_sum):
-                obj_func = obj_func[0]
-            else:
-                raise TypeError()
-        
+       
+        (obj_func := self.obj_func).arg = sol
         obj_func.get_value()
         obj_func.get_gradient()
         eval = obj_func.evaluator
@@ -169,11 +155,12 @@ ctrl = BoolArrayClass(space, space.mesh)
 sol_type = sol_param.pop('type', 'penalty')
 if sol_type == 'unconstrained':
     sol_param = SolverParameters(**sol_param)
+    obj = ObjectiveFunctional(space)
     solver = UnconstrainedSolver(
         weighted_sum(
             [
                 with_safety_factor(
-                    ObjectiveFunctional(space),
+                    obj,
                     prob_param.setdefault('safety_factor', 0.05)
                 ),
                 MeasureFunctional(space)
@@ -183,20 +170,23 @@ if sol_type == 'unconstrained':
             [1.0, 0.0]
         ),
         initial_sol=ctrl,
-        callback=Callback(args.output),
+        callback=Callback(obj, args.output),
         param=sol_param
     )
 elif sol_type == 'penalty':
     sol_param = PenaltySolver.Parameters(**sol_param)
+    obj = ObjectiveFunctional(space)
+
+    # NOTE: With PenaltySolver, objective comes last. Hence, err_wgt is reversed.
     solver = PenaltySolver(
-        with_safety_factor(ObjectiveFunctional(space),
+        with_safety_factor(obj,
                            prob_param.setdefault('safety_factor', 0.05)),
         MeasureFunctional(space) <= prob_param.setdefault('measure_bound', 0.4),
         x0=ctrl,
         mu=prob_param.setdefault('mu_init', 0.01),
-        err_wgt=[1.0, 0.0],
+        err_wgt=[0.0, 1.0],
         param=sol_param,
-        callback=Callback(args.output)
+        callback=Callback(obj, args.output)
     )
 else:
     raise ValueError(f'unknown solver type {sol_type}')
