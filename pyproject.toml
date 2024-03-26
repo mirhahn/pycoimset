@@ -17,3 +17,6 @@ dependencies = [
 
 [build-system]
 requires = ["setuptools", "wheel", "setuptools_scm[toml]>=6.2"]
+
+[tool.setuptools]
+packages = ['pycoimset']

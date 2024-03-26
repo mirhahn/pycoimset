@@ -1,0 +1,43 @@
+image: python:3
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "trigger"
+
+default:
+  cache:
+    paths:
+      - .cache/pip
+  before_script:
+    - python -V
+    - pip install --upgrade build twine
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+build:
+  stage: build
+  script:
+    - python3 -m build
+  artifacts:
+    paths:
+      - dist/*
+
+test:
+  stage: test
+  script:
+    - twine check dist/*
+
+publish:
+  stage: publish
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+  variables:
+    TWINE_REPOSITORY_URL: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/pypi"
+    TWINE_USERNAME: "gitlab-ci-token"
+    TWINE_PASSWORD: "$CI_JOB_TOKEN"
+    TWINE_NON_INTERACTIVE: true
+  script:
+    - twine upload dist/*
