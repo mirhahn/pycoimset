@@ -3,7 +3,7 @@ name = "pycoimset"
 version = "0.1.2"
 description = "Python library for set-valued optimization"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = "~= 3.11"
 license = { file = "LICENSE.md" }
 authors = [ { name = "Mirko Hahn", email = "mirhahn@ovgu.de" } ]
 classifiers = [
@@ -12,7 +12,7 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-  'numpy>=1.24.2'
+  'numpy ~= 1.24'
 ]
 
 [build-system]
