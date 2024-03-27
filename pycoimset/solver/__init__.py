@@ -19,8 +19,8 @@ Solver implementations.
 Classes
 -------
 PenaltySolver
-    Naive trust-region penalty method for constrained problems.
-    Generally yields non-interior points.
+    Naive quadratic trust-region penalty method for constrained problems.
+    May yield points slightly outside the feasible region.
 
 UnconstrainedSolver
     Simple trust-region steepest descent method for unconstrained

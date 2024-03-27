@@ -36,18 +36,11 @@ Spc = TypeVar('Spc', bound='SimilaritySpace')
 
 class SimilarityClass(Protocol[Spc]):
     '''
-    Protocol class for the values of a vector of set-valued variables.
-
-    Although named `SimilarityClass`, this protocol is expressly meant
-    to support both single similarity classes and product similarity
-    classes. Although a general implementation of product similarity
-    classes is both conceivable and may be provided in the future. It
-    is always better to provide an implementation that is tailored to
-    the problem at hand.
+    Protocol class for the value of a set-valued variable.
     '''
     @property
     def space(self) -> Spc:
-        '''Underlying measure space.'''
+        '''Underlying similarity space.'''
         ...
 
     @property
@@ -58,7 +51,25 @@ class SimilarityClass(Protocol[Spc]):
     def subset(self, meas_low: float, meas_high: float,
                hint: Optional['SignedMeasure[Spc]'] = None
                ) -> 'SimilarityClass[Spc]':
-        '''Choose subset within a given size range.'''
+        '''
+        Choose subset within a given size range.
+
+        This is an essential component of the optimization process. It is used
+        to grow the step set to the required size if the gradient density
+        function has a plateau.
+
+        Arguments
+        ---------
+        meas_low : float
+            Lower measure bound.
+
+        meas_high : float
+            Upper measure bound.
+
+        hint : SignedMeasure[Spc] (optional)
+            Optional signed measure that the selection process should attempt
+            to minimize. Can be ignored safely. Defaults to `None`.
+        '''
         ...
 
     def __invert__(self) -> 'SimilarityClass[Spc]':
@@ -109,15 +120,10 @@ class SimilarityClass(Protocol[Spc]):
 class SignedMeasure(Protocol[Spc]):
     '''
     Protocol for gradient measures.
-
-    Like :class:`SimilarityClass`, this may be used to represent a
-    vector of signed measures.
     '''
-
-
     @property
     def space(self) -> Spc:
-        '''Underlying measure space.'''
+        '''Underlying similarity space.'''
         ...
 
     @property
@@ -136,6 +142,11 @@ class SignedMeasure(Protocol[Spc]):
     def linfty_norm(self) -> float | NotImplementedType:
         '''
         Calculate essential supremum of absolute density.
+
+        May return `NotImplemented` if the implementation does not allow for
+        the essential supremum to be calculated. This may prevent some
+        optimization methods (such as the penalty method) from being applied
+        to the problem.
 
         Notes
         -----
@@ -241,8 +252,6 @@ class SignedMeasure(Protocol[Spc]):
 class SimilaritySpace(Protocol):
     '''
     Protocol for the underlying metric space of a :class:`SimilarityClass`.
-
-    This may also encode a product similarity space.
     '''
     @property
     def measure(self) -> float:

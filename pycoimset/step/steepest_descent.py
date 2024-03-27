@@ -141,7 +141,6 @@ class SteepestDescentStepFinder(UnconstrainedStepFinder[Spc]):
         # the relative measures of the residual sets.
         if min_size > 0.0:
             fill = (ub - lb).subset(min_size, max_size, hint=grad)
-            oldstep = step
             step = step | fill
 
         assert step.measure > 0

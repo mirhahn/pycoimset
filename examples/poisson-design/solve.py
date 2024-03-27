@@ -16,11 +16,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-'''
-Solver for the "Topology optimisation of heat conduction problems
-governed by the Poisson equation" example of the 
-'''
-
 import argparse
 import json
 import logging

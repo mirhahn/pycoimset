@@ -33,9 +33,6 @@ __all__ = [
 
 
 Spc = TypeVar('Spc', bound=SimilaritySpace)
-'''
-Similarity space type variable.
-'''
 
 
 class Operator(Enum):
@@ -77,7 +74,7 @@ class Operator(Enum):
 @dataclass(frozen=True)
 class Constraint(Generic[Spc]):
     '''
-    Abstract description of a differentiable constraint.
+    Description of a differentiable constraint.
 
     Parameters
     ----------
@@ -120,7 +117,7 @@ class ErrorNorm(StrEnum):
 
     def estimated_error(self, measure: float, error_norm: float) -> float:
         '''
-        Estimate errr for a similarity class of given size.
+        Estimate error for a similarity class of given size.
 
         :param measure: Measure of the similarity class.
         :type measure: float

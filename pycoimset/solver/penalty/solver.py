@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 '''
-Naive penalty method for constrained optimization.
+Naive quadratic penalty method for constrained optimization.
 '''
 
 from dataclasses import dataclass

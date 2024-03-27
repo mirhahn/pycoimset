@@ -25,6 +25,12 @@ __all__ = ['JSONSerializable']
 
 
 class JSONSerializable(Protocol):
+    '''
+    Protocol for objects that can be serialized to JSON.
+
+    Default implementations are provided for Python data classes. These are
+    serialized using `dataclasses.asdict`.
+    '''
     def toJSON(self) -> dict | list:
         '''Serialize the object into a JSON-compatible object.'''
         if dataclasses.is_dataclass(self):

@@ -381,7 +381,6 @@ class PoissonEvaluator:
         '''Gradient L^1 error estimator.'''
         # Retrieve spaces and mesh.
         s = self.spaces
-        m = self.mesh
 
         # Get DOF vectors.
         y = self.qpdesol
