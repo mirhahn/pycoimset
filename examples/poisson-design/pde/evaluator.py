@@ -23,13 +23,25 @@ import logging
 import math
 import time
 from typing import NamedTuple, Optional, cast
-from matplotlib.patheffects import withTickedStroke
 
 from numpy import float_
-from numpy.typing import NDArray
 import numpy
-from skfem import Basis, BilinearForm, DiscreteField, ElementTriP0, ElementTriP1, ElementTriP2, FacetBasis, Functional, InteriorFacetBasis, LinearForm, Mesh, MeshTri, condense, solve
-from skfem.helpers import grad
+from numpy.typing import NDArray
+from skfem import (
+    Basis,
+    BilinearForm,
+    ElementTriP0,
+    ElementTriP1,
+    ElementTriP2,
+    FacetBasis,
+    Functional,
+    InteriorFacetBasis,
+    LinearForm,
+    Mesh,
+    MeshTri,
+    condense,
+    solve,
+)
 import skfem
 import skfem.utils
 
