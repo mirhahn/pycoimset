@@ -17,10 +17,10 @@
 Main Lotka-Volterra fishing ODE system.
 '''
 
-from typing import Optional, cast, overload, Tuple
+from typing import Optional, cast, Tuple
 
 import numpy
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, NDArray
 import scipy.integrate
 
 from .typing import OdeSolutionLike
@@ -294,15 +294,7 @@ class LotkaAdjointIVP:
         '''
         return numpy.array([0.0, 0.0, 1.0])
 
-    @overload
-    def import_times(self, times: float) -> float:
-        ...
-
-    @overload
-    def import_times(self, times: ArrayLike) -> numpy.ndarray:
-        ...
-
-    def import_times(self, times):
+    def import_times(self, times: ArrayLike) -> NDArray:
         '''
         Import a time vector to the reversed time scale.
 
@@ -317,20 +309,11 @@ class LotkaAdjointIVP:
         :type times: float or array-like
         :rtype: float or `numpy.ndarray`
         '''
-        if not isinstance(times, float):
-            times = numpy.asarray(times)
+        times = numpy.asarray(times, dtype=float)
         _, tend = self.fwd_ivp.time_range
         return tend - times
 
-    @overload
-    def export_times(self, times: float) -> float:
-        ...
-
-    @overload
-    def export_times(self, times: ArrayLike) -> numpy.ndarray:
-        ...
-
-    def export_times(self, times):
+    def export_times(self, times: ArrayLike) -> NDArray:
         '''
         Export a time vector to the original time scale.
 
@@ -342,8 +325,7 @@ class LotkaAdjointIVP:
         :type times: float or array-like
         :rtype: float or `numpy.ndarray`
         '''
-        if not isinstance(times, float):
-            times = numpy.asarray(times)
+        times = numpy.asarray(times)
         _, tend = self.fwd_ivp.time_range
         return tend - times
 

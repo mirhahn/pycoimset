@@ -133,7 +133,7 @@ class SignedMeasure(Protocol[Spc]):
         return self(self > 0) - self(self < 0)
 
     @property
-    def linfty_norm(self) -> float:
+    def linfty_norm(self) -> float | NotImplementedType:
         '''
         Calculate essential supremum of absolute density.
 
@@ -142,7 +142,7 @@ class SignedMeasure(Protocol[Spc]):
             This property is generally not cached. You should use `norm`
             instead.
         '''
-        raise NotImplementedError('Linfty norm has not been implemented.')
+        return NotImplemented
 
     @final
     @cached_method('_cache_norm')
@@ -171,7 +171,9 @@ class SignedMeasure(Protocol[Spc]):
             measure type.
         '''
         if kind == 'Linfty':
-            return self.linfty_norm
+            if isinstance(norm := self.linfty_norm, NotImplementedType):
+                raise NotImplementedError('Linfty norm is not implemented')
+            return norm
         else:
             return self.l1_norm
 

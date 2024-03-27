@@ -42,7 +42,7 @@ from .space import (
     IntervalSimilarityClass,
     IntervalSimilaritySpace,
     PolynomialSignedMeasure,
-)         # pyright: ignore # noqa
+)
 
 __all__ = ['LotkaObjectiveFunctional']
 

@@ -222,9 +222,3 @@ class Functional(Protocol[Spc]):
         Create greater-than-or-equal constraint.
         '''
         return Constraint[Spc](self, Operator.GREATER_THAN, shift)
-
-    def __eq__(self, shift: float) -> Constraint[Spc]:
-        '''
-        Create equality constraint.
-        '''
-        return Constraint[Spc](self, Operator.EQUAL_TO, shift)

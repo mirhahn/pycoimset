@@ -21,7 +21,6 @@ from typing import Optional, cast
 import numpy
 
 import pycoimset
-import skfem
 
 from pde import PoissonEvaluator
 from space import BoolArrayClass, Mesh, SignedMeasure, SimilaritySpace
@@ -55,11 +54,11 @@ class MeasureFunctional(pycoimset.Functional[SimilaritySpace]):
         return cast(BoolArrayClass, self._arg)
 
     @arg.setter
-    def arg(self, x: pycoimset.SimilarityClass[SimilaritySpace]):
-        if not isinstance(x, BoolArrayClass):
+    def arg(self, arg: pycoimset.SimilarityClass[SimilaritySpace] | None):
+        if not isinstance(arg, BoolArrayClass):
             raise NotImplementedError('Not implemented for type '
-                                      f'{type(x).__name__}')
-        self._arg = x
+                                      f'{type(arg).__name__}')
+        self._arg = arg
         self._val = None
         self._grad = None
 
@@ -68,7 +67,7 @@ class MeasureFunctional(pycoimset.Functional[SimilaritySpace]):
         return 0.0
 
     @val_tol.setter
-    def val_tol(self, _):
+    def val_tol(self, tol: float):
         pass
 
     @property
@@ -76,7 +75,7 @@ class MeasureFunctional(pycoimset.Functional[SimilaritySpace]):
         return 0.0
 
     @grad_tol.setter
-    def grad_tol(self, _):
+    def grad_tol(self, tol: float):
         pass
 
     @property
@@ -124,11 +123,11 @@ class ObjectiveFunctional(pycoimset.Functional[SimilaritySpace]):
         return cast(BoolArrayClass, self._arg)
 
     @arg.setter
-    def arg(self, x: pycoimset.SimilarityClass[SimilaritySpace]) -> None:
-        if not isinstance(x, BoolArrayClass):
+    def arg(self, arg: pycoimset.SimilarityClass[SimilaritySpace] | None):
+        if not isinstance(arg, BoolArrayClass):
             raise NotImplementedError('Not implemented for type '
-                                      f'{type(x).__name__}')
-        self._arg = x
+                                      f'{type(arg).__name__}')
+        self._arg = arg
         self._eval = None
 
     @property
@@ -172,20 +171,8 @@ class ObjectiveFunctional(pycoimset.Functional[SimilaritySpace]):
 
     def get_gradient(self) -> tuple[SignedMeasure, float]:
         # Evaluate gradient.
-        arg = self.arg
         eval = self.evaluator
         eval.eval_grad()
-
-        # Coarsening step (skipped to keep refinement from successful steps.)
-#        # Map fine gradient to elements of coarse mesh.
-#        elmap = arg.mesh.element_map(eval.mesh)
-#        fine_dof = eval.grad
-#        coarse_dof = numpy.zeros(arg.mesh.mesh.nelements)
-#        numpy.add.at(coarse_dof, elmap, fine_dof)
-#        del elmap, fine_dof
-#
-#        coarse_dof = -(2 * arg.flag - 1) * coarse_dof / arg.mesh.element_measure
-#        grad = SignedMeasure(self.input_space, arg.mesh, coarse_dof)
 
         dof = -(2 * eval.ctrl - 1) * eval.grad / eval.vol
         grad = SignedMeasure(self.input_space, Mesh(eval.mesh, parent=self.arg.mesh), dof)

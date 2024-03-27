@@ -18,7 +18,7 @@ Static typing protocols for I/O operations.
 '''
 
 import dataclasses
-from typing import Protocol, Self, cast
+from typing import Protocol, Self, Type, cast
 
 
 __all__ = ['JSONSerializable']
@@ -28,6 +28,7 @@ class JSONSerializable(Protocol):
     def toJSON(self) -> dict | list:
         '''Serialize the object into a JSON-compatible object.'''
         if dataclasses.is_dataclass(self):
+            assert not isinstance(self, Type)
             return dataclasses.asdict(self)
         raise NotImplementedError()
 

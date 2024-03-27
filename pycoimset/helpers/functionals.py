@@ -284,10 +284,10 @@ class weighted_sum(Functional[Spc], Generic[Spc]):
         return self._f[0].arg
     
     @arg.setter
-    def arg(self, x: Optional[SimilarityClass[Spc]]) -> None:
+    def arg(self, arg: Optional[SimilarityClass[Spc]]) -> None:
         for f in self._f:
-            if f.arg is not x:
-                f.arg = x
+            if f.arg is not arg:
+                f.arg = arg
 
     @property
     def val_tol(self) -> float:
