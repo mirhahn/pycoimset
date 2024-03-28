@@ -38,6 +38,6 @@ publish:
     TWINE_REPOSITORY_URL: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/pypi"
     TWINE_USERNAME: "gitlab-ci-token"
     TWINE_PASSWORD: "$CI_JOB_TOKEN"
-    TWINE_NON_INTERACTIVE: true
+    TWINE_NON_INTERACTIVE: "yes"
   script:
     - twine upload dist/*
