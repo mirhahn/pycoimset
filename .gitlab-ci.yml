@@ -31,7 +31,7 @@ test:
     - twine check dist/*
 
 publish:
-  stage: publish
+  stage: deploy
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
   variables:
