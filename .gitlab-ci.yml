@@ -2,8 +2,8 @@ image: python:3
 
 workflow:
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH == "main"
-    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "trigger"
 
 default:
@@ -19,6 +19,18 @@ variables:
   PYPI_PACKAGE_REGISTRY_URL: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/pypi"
   PEP440_VERSION_PATTERN: "^([1-9][0-9]*!)?(0|[1-9][0-9]*)(\\.(0|[1-9][0-9]*))*((a|b|rc)(0|[1-9][0-9]*))?(\\.post(0|[1-9][0-9]*))?(\\.dev(0|[1-9][0-9]*))?$"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  FORCE_PACKAGE_UPLOAD:
+    value: no
+    description: "Forces distribution packages to be uploaded for unprotected tags"
+    options:
+      - yes
+      - no
+  FORCE_RELEASE_CREATION:
+    value: no
+    description: "Forces releases to be created for unprotected tags"
+    options:
+      - yes
+      - no
 
 build:
   stage: build
@@ -42,7 +54,7 @@ push-binaries:
     - job: build
       artifacts: true
   rules:
-    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG =~ $PEP440_VERSION_PATTERN && ($CI_COMMIT_REF_PROTECTED || $FORCE_BINARY_UPLOAD)
+    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG =~ $PEP440_VERSION_PATTERN && ($CI_COMMIT_REF_PROTECTED || $FORCE_PACKAGE_UPLOAD == "yes")
   variables:
     TWINE_REPOSITORY_URL: "$PYPI_PACKAGE_REGISTRY_URL"
     TWINE_USERNAME: "gitlab-ci-token"
@@ -61,7 +73,7 @@ create-release:
   stage: deploy
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   rules:
-    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG =~ $PEP440_VERSION_PATTERN && ($CI_COMMIT_REF_PROTECTED || $FORCE_RELEASE_CREATION)
+    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG =~ $PEP440_VERSION_PATTERN && ($CI_COMMIT_REF_PROTECTED || $FORCE_RELEASE_CREATION == "yes")
   needs:
     - job: build
       artifacts: true
