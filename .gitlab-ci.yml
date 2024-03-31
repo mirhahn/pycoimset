@@ -20,17 +20,17 @@ variables:
   PEP440_VERSION_PATTERN: "^([1-9][0-9]*!)?(0|[1-9][0-9]*)(\\.(0|[1-9][0-9]*))*((a|b|rc)(0|[1-9][0-9]*))?(\\.post(0|[1-9][0-9]*))?(\\.dev(0|[1-9][0-9]*))?$"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   FORCE_PACKAGE_UPLOAD:
-    value: no
+    value: "no"
     description: "Forces distribution packages to be uploaded for unprotected tags"
     options:
-      - yes
-      - no
+      - "yes"
+      - "no"
   FORCE_RELEASE_CREATION:
-    value: no
+    value: "no"
     description: "Forces releases to be created for unprotected tags"
     options:
-      - yes
-      - no
+      - "yes"
+      - "no"
 
 build:
   stage: build
