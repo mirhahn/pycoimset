@@ -17,11 +17,7 @@ default:
 variables:
   GENERIC_PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/pycoimset"
   PYPI_PACKAGE_REGISTRY_URL: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/pypi"
-
-.is-release-tag:
-  - if: $CI_COMMIT_TAG =~ "^([1-9][0-9]*!)?(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*((a|b|rc)(0|[1-9][0-9]*))?(\.post(0|[1-9][0-9]*))?(\.dev(0|[1-9][0-9]*))?$" && $CI_COMMIT_REF_PROTECTED
-
-variables:
+  PEP440_VERSION_PATTERN: "^([1-9][0-9]*!)?(0|[1-9][0-9]*)(\\.(0|[1-9][0-9]*))*((a|b|rc)(0|[1-9][0-9]*))?(\\.post(0|[1-9][0-9]*))?(\\.dev(0|[1-9][0-9]*))?$"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 build:
@@ -46,7 +42,7 @@ push-binaries:
     - job: build
       artifacts: true
   rules:
-    - !reference [.is-release-tag]
+    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG =~ $PEP440_VERSION_PATTERN && ($CI_COMMIT_REF_PROTECTED || $FORCE_BINARY_UPLOAD)
   variables:
     TWINE_REPOSITORY_URL: "$PYPI_PACKAGE_REGISTRY_URL"
     TWINE_USERNAME: "gitlab-ci-token"
@@ -65,7 +61,7 @@ create-release:
   stage: deploy
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   rules:
-    - !reference [.is-release-tag]
+    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG =~ $PEP440_VERSION_PATTERN && ($CI_COMMIT_REF_PROTECTED || $FORCE_RELEASE_CREATION)
   needs:
     - job: build
       artifacts: true
