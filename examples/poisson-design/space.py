@@ -1,6 +1,6 @@
 # PyCoimset Example "Poisson Design": Similarity space definitions
 #
-# Copyright 2023 Mirko Hahn
+# Copyright 2024 Mirko Hahn
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -126,9 +126,11 @@ class Mesh(Generic[M]):
     def is_refinement_of(self, parent: Self | M) -> bool:
         '''Test whether this mesh is a refinement of another.'''
         if isinstance(parent, Mesh):
-            pred = lambda x: x is parent
+            def pred(x: Self) -> bool:
+                return x is parent
         else:
-            pred = lambda x: x.mesh is parent
+            def pred(x: Self) -> bool:
+                return x.mesh is parent
         cur = self
         while cur is not None and not pred(cur):
             cur = cur.parent

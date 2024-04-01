@@ -1,6 +1,6 @@
 # PyCoimset: Python library for COntinuous IMprovement of SETs
 #
-# Copyright 2023 Mirko Hahn
+# Copyright 2024 Mirko Hahn
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,16 +18,23 @@ Static typing protocols for I/O operations.
 '''
 
 import dataclasses
-from typing import Protocol, Self, cast
+from typing import Protocol, Self, Type, cast
 
 
 __all__ = ['JSONSerializable']
 
 
 class JSONSerializable(Protocol):
+    '''
+    Protocol for objects that can be serialized to JSON.
+
+    Default implementations are provided for Python data classes. These are
+    serialized using `dataclasses.asdict`.
+    '''
     def toJSON(self) -> dict | list:
         '''Serialize the object into a JSON-compatible object.'''
         if dataclasses.is_dataclass(self):
+            assert not isinstance(self, Type)
             return dataclasses.asdict(self)
         raise NotImplementedError()
 

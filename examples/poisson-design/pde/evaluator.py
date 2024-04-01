@@ -1,6 +1,6 @@
 # PyCoimset Example "Poisson Design": PDE-related functionality
 #
-# Copyright 2023 Mirko Hahn
+# Copyright 2024 Mirko Hahn
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,13 +23,25 @@ import logging
 import math
 import time
 from typing import NamedTuple, Optional, cast
-from matplotlib.patheffects import withTickedStroke
 
 from numpy import float_
-from numpy.typing import NDArray
 import numpy
-from skfem import Basis, BilinearForm, DiscreteField, ElementTriP0, ElementTriP1, ElementTriP2, FacetBasis, Functional, InteriorFacetBasis, LinearForm, Mesh, MeshTri, condense, solve
-from skfem.helpers import grad
+from numpy.typing import NDArray
+from skfem import (
+    Basis,
+    BilinearForm,
+    ElementTriP0,
+    ElementTriP1,
+    ElementTriP2,
+    FacetBasis,
+    Functional,
+    InteriorFacetBasis,
+    LinearForm,
+    Mesh,
+    MeshTri,
+    condense,
+    solve,
+)
 import skfem
 import skfem.utils
 
@@ -369,7 +381,6 @@ class PoissonEvaluator:
         '''Gradient L^1 error estimator.'''
         # Retrieve spaces and mesh.
         s = self.spaces
-        m = self.mesh
 
         # Get DOF vectors.
         y = self.qpdesol

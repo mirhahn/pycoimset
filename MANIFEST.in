@@ -1,0 +1,2 @@
+recursive-exclude examples/* run*.zip
+exclude .gitlab-ci.yaml

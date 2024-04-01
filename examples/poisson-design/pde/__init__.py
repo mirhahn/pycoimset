@@ -1,6 +1,6 @@
 # PyCoimset Example "Poisson Design": PDE-related functionality
 #
-# Copyright 2023 Mirko Hahn
+# Copyright 2024 Mirko Hahn
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.

@@ -1,6 +1,6 @@
 # PyCoimset: Python library for COntinuous IMprovement of SETs
 #
-# Copyright 2023 Mirko Hahn
+# Copyright 2024 Mirko Hahn
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -33,9 +33,6 @@ __all__ = [
 
 
 Spc = TypeVar('Spc', bound=SimilaritySpace)
-'''
-Similarity space type variable.
-'''
 
 
 class Operator(Enum):
@@ -77,7 +74,7 @@ class Operator(Enum):
 @dataclass(frozen=True)
 class Constraint(Generic[Spc]):
     '''
-    Abstract description of a differentiable constraint.
+    Description of a differentiable constraint.
 
     Parameters
     ----------
@@ -120,7 +117,7 @@ class ErrorNorm(StrEnum):
 
     def estimated_error(self, measure: float, error_norm: float) -> float:
         '''
-        Estimate errr for a similarity class of given size.
+        Estimate error for a similarity class of given size.
 
         :param measure: Measure of the similarity class.
         :type measure: float
@@ -222,9 +219,3 @@ class Functional(Protocol[Spc]):
         Create greater-than-or-equal constraint.
         '''
         return Constraint[Spc](self, Operator.GREATER_THAN, shift)
-
-    def __eq__(self, shift: float) -> Constraint[Spc]:
-        '''
-        Create equality constraint.
-        '''
-        return Constraint[Spc](self, Operator.EQUAL_TO, shift)

@@ -1,5 +1,5 @@
 # PyCoimset - Python library for optimization with set-valued variables.
-# Copyright 2023 Mirko Hahn
+# Copyright 2024 Mirko Hahn
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -141,7 +141,6 @@ class SteepestDescentStepFinder(UnconstrainedStepFinder[Spc]):
         # the relative measures of the residual sets.
         if min_size > 0.0:
             fill = (ub - lb).subset(min_size, max_size, hint=grad)
-            oldstep = step
             step = step | fill
 
         assert step.measure > 0

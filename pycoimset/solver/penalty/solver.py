@@ -1,6 +1,6 @@
 # PyCoimset: Python library for COntinuous IMprovement of SETs
 #
-# Copyright 2023 Mirko Hahn
+# Copyright 2024 Mirko Hahn
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 '''
-Naive penalty method for constrained optimization.
+Naive quadratic penalty method for constrained optimization.
 '''
 
 from dataclasses import dataclass

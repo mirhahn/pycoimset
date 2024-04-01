@@ -1,3 +1,2 @@
-examples/poisson-design/run_unconstrained_01.zip filter=lfs diff=lfs merge=lfs -text
-examples/lotka-volterra/run_01.zip filter=lfs diff=lfs merge=lfs -text
-examples/poisson-design/run_penalty_01.zip filter=lfs diff=lfs merge=lfs -text
+examples/poisson-design/*.zip filter=lfs diff=lfs merge=lfs -text
+examples/lotka-volterra/*.zip filter=lfs diff=lfs merge=lfs -text

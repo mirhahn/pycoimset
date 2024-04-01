@@ -1,6 +1,6 @@
 # PyCoimset Example "Lotka-Volterra": Problem-specific code
 #
-# Copyright 2023 Mirko Hahn
+# Copyright 2024 Mirko Hahn
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 '''
-Implementation of a similarity class.
+Implementation of the underlying similarity space.
 '''
 
 import copy
@@ -138,6 +138,10 @@ def join_polynomial_splines(ta: ArrayLike, pa: ArrayLike, tb: ArrayLike,
 
 class IntervalSimilaritySpace(SimilaritySpace,
                               JSONSerializable):
+    '''
+    Similarity space based on a closed real number interval with the Borel
+    sigma-algebra and the Lebesgue measure.
+    '''
     time_range: tuple[float, float]
 
     def __init__(self, time_range: tuple[float, float]):
@@ -185,6 +189,9 @@ class IntervalSimilaritySpace(SimilaritySpace,
 
 class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace],
                               JSONSerializable):
+    '''
+    Similarity class implementation that uses sorted switching times.
+    '''
     #: Underlying similarity space.
     _space: IntervalSimilaritySpace
 

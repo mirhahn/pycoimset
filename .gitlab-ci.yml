@@ -1,0 +1,102 @@
+image: python:3
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "trigger" || $CI_PIPELINE_SOURCE == "merge_request_event"
+
+default:
+  cache:
+    paths:
+      - .cache/pip
+
+variables:
+  GENERIC_PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/pycoimset"
+  PYPI_PACKAGE_REGISTRY_URL: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/pypi"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PEP440_VERSION_PATTERN: '/^([1-9][0-9]*!)?(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*((a|b|rc)(0|[1-9][0-9]*))?(\.post(0|[1-9][0-9]*))?(\.dev(0|[1-9][0-9]*))?$/'
+  FORCE_PACKAGE_UPLOAD:
+    value: "no"
+    description: "Forces distribution packages to be uploaded for unprotected tags"
+    options:
+      - "yes"
+      - "no"
+  FORCE_RELEASE_CREATION:
+    value: "no"
+    description: "Forces releases to be created for unprotected tags"
+    options:
+      - "yes"
+      - "no"
+
+stages:
+  - build
+  - test
+  - release
+
+build:
+  stage: build
+  before_script:
+    - pip install --upgrade build
+  script:
+    - python3 -m build
+  artifacts:
+    paths:
+      - dist/*
+
+test:
+  stage: test
+  needs:
+    - job: build
+      artifacts: true
+  before_script:
+    - pip install --upgrade twine
+  script:
+    - twine check dist/*
+
+push-binaries:
+  stage: release
+  needs:
+    - job: build
+      artifacts: true
+    - job: test
+  rules:
+    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG =~ $PEP440_VERSION_PATTERN && ($CI_COMMIT_REF_PROTECTED == "true" || $FORCE_PACKAGE_UPLOAD == "yes")
+  variables:
+    TWINE_REPOSITORY_URL: "$PYPI_PACKAGE_REGISTRY_URL"
+    TWINE_USERNAME: "gitlab-ci-token"
+    TWINE_PASSWORD: "$CI_JOB_TOKEN"
+    TWINE_NON_INTERACTIVE: "yes"
+  before_script:
+    - pip install --upgrade twine
+  script:
+    - |
+      for file in dist/*; do
+        curl --header "JOB-TOKEN:$CI_JOB_TOKEN" \
+          --upload-file "$file" \
+          "$GENERIC_PACKAGE_REGISTRY_URL/$CI_COMMIT_TAG/$(basename $file)"
+      done
+    - twine upload dist/*
+
+create-release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: $CI_COMMIT_TAG && $CI_COMMIT_TAG =~ $PEP440_VERSION_PATTERN && ($CI_COMMIT_REF_PROTECTED == "true" || $FORCE_RELEASE_CREATION == "yes")
+  needs:
+    - job: build
+      artifacts: true
+    - job: test
+    - job: push-binaries
+  script:
+    - echo "Creating release $CI_COMMIT_TAG"
+    - |
+      for file in dist/*; do
+        FILENAME=`basename $file`
+        echo "--assets-link '{
+          \"name\": \"$FILENAME\",
+          \"url\": \"$GENERIC_PACKAGE_REGISTRY_URL/$CI_COMMIT_TAG/$FILENAME\",
+          \"link_type\": \"package\"
+        }'"
+      done | xargs release-cli create --name "Version $CI_COMMIT_TAG: $CI_COMMIT_TITLE" \
+        --description "$CI_COMMIT_DESCRIPTION" \
+        --tag-name "$CI_COMMIT_TAG"
