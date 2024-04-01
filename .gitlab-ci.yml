@@ -14,7 +14,7 @@ variables:
   GENERIC_PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/pycoimset"
   PYPI_PACKAGE_REGISTRY_URL: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/pypi"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
-  PEP440_VERSION_PATTERN: '/^([1-9][0-9]*!)?(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*((a|b|rc)(0|[1-9][0-9]*))?(\.post(0|[1-9][0-9]*))?(\.dev(0|[1-9][0-9]*))?$/'
+  PEP440_VERSION_PATTERN: '/^v([1-9][0-9]*!)?(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*((a|b|rc)(0|[1-9][0-9]*))?(\.post(0|[1-9][0-9]*))?(\.dev(0|[1-9][0-9]*))?$/'
   FORCE_PACKAGE_UPLOAD:
     value: "no"
     description: "Forces distribution packages to be uploaded for unprotected tags"
@@ -70,10 +70,11 @@ push-binaries:
     - pip install --upgrade twine
   script:
     - |
+      RELEASE_VERSION=`echo "$CI_COMMIT_TAG" | cut -c 2-`
       for file in dist/*; do
         curl --header "JOB-TOKEN:$CI_JOB_TOKEN" \
           --upload-file "$file" \
-          "$GENERIC_PACKAGE_REGISTRY_URL/$CI_COMMIT_TAG/$(basename $file)"
+          "$GENERIC_PACKAGE_REGISTRY_URL/$RELEASE_VERSION/$(basename $file)"
       done
     - twine upload dist/*
 
@@ -90,13 +91,14 @@ create-release:
   script:
     - echo "Creating release $CI_COMMIT_TAG"
     - |
+      RELEASE_VERSION=`echo "$CI_COMMIT_TAG" | cut -c 2-`
       for file in dist/*; do
         FILENAME=`basename $file`
         echo "--assets-link '{
           \"name\": \"$FILENAME\",
-          \"url\": \"$GENERIC_PACKAGE_REGISTRY_URL/$CI_COMMIT_TAG/$FILENAME\",
+          \"url\": \"$GENERIC_PACKAGE_REGISTRY_URL/$RELEASE_VERSION/$FILENAME\",
           \"link_type\": \"package\"
         }'"
-      done | xargs release-cli create --name "Version $CI_COMMIT_TAG: $CI_COMMIT_TITLE" \
+      done | xargs release-cli create --name "Version $RELEASE_VERSION: $CI_COMMIT_TITLE" \
         --description "$CI_COMMIT_DESCRIPTION" \
         --tag-name "$CI_COMMIT_TAG"
