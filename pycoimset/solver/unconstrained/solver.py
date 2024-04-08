@@ -49,6 +49,14 @@ T = TypeVar('T')
 
 logger = logging.getLogger(__name__)
 
+# Find timing function
+if hasattr(time, 'process_time'):
+    get_time = time.process_time
+elif hasattr(time, 'perf_counter'):
+    get_time = time.perf_counter
+else:
+    get_time = time.monotonic
+
 
 @dataclass
 class SolverParameters(JSONSerializable):
@@ -349,7 +357,7 @@ class UnconstrainedSolver(Generic[Spc]):
         grad_val = make_grad_eval(self.f, cache_size=2)
 
         # Record start time.
-        start_time = time.perf_counter()
+        start_time = get_time()
 
         # Evaluate initial gradient.
         g, set_neg, instat, _ = eval_grad(grad_val,
@@ -366,7 +374,7 @@ class UnconstrainedSolver(Generic[Spc]):
 
         # Print initial log line.
         self._log.push_line(
-            time=time.perf_counter() - start_time,
+            time=get_time() - start_time,
             iter=self._stats.n_iter,
             obj=(obj_val := func_val(self.x, math.inf)[0]),
             instat=instat
@@ -458,7 +466,7 @@ class UnconstrainedSolver(Generic[Spc]):
             # Print log line.
             if step_accepted:
                 self._log.push_line(
-                    time=time.perf_counter() - start_time,
+                    time=get_time() - start_time,
                     iter=self._stats.n_iter,
                     obj=obj_val,
                     instat=instat,

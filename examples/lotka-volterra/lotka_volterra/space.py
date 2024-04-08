@@ -296,7 +296,7 @@ class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace],
                   - self.switch_times[:-1:2])
         if measure < 0:
             raise RuntimeError()
-        setattr(self, 'measure', measure)
+        self.__dict__['measure'] = measure
         return measure
 
     def __copy__(self) -> 'IntervalSimilarityClass':
@@ -520,7 +520,7 @@ class PolynomialSignedMeasure(SignedMeasure[IntervalSimilaritySpace]):
         # Evaluate polynomials at points
         val = numpy.abs(traj.piece_eval(roots))
         norm = val[~numpy.isnan(val)].max()
-        setattr(self, 'linfty_norm', norm)
+        self.__dict__['linfty_norm'] = norm
         return norm
 
     @property
