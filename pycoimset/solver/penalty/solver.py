@@ -65,6 +65,15 @@ Spc = TypeVar('Spc', bound=SimilaritySpace)
 logger = logging.getLogger(__name__)
 
 
+# Find timing function
+if hasattr(time, 'process_time'):
+    get_time = time.process_time
+elif hasattr(time, 'perf_counter'):
+    get_time = time.perf_counter
+else:
+    get_time = time.monotonic
+
+
 # Formatting for NumPy arrays.
 def ndarray_debug_format(a: NDArray):
     return numpy.array2string(
@@ -273,7 +282,7 @@ class PenaltySolver(Generic[Spc]):
         pen_grad = None
 
         # Record start time.
-        start_time = time.perf_counter()
+        start_time = get_time()
 
         # Evaluate initial infeasibility.
         nu, _ = eval_infeas(
@@ -314,7 +323,7 @@ class PenaltySolver(Generic[Spc]):
 
         # Output initial iterate.
         self.logger.push_line(
-            time=time.perf_counter() - start_time,
+            time=get_time() - start_time,
             iter=self.stats.n_iter,
             objval=self.f[-1](x, math.inf)[0],
             instat=tau,
@@ -410,7 +419,7 @@ class PenaltySolver(Generic[Spc]):
             # Output log line and reset iteration rejection counter
             if step_accept:
                 self.logger.push_line(
-                    time=time.perf_counter() - start_time,
+                    time=get_time() - start_time,
                     iter=self.stats.n_iter,
                     objval=f2,
                     instat=tau,
