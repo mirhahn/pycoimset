@@ -101,11 +101,11 @@ args = parser.parse_args()
 # Set up logging.
 logging.basicConfig(format=logging.BASIC_FORMAT, stream=sys.stdout)
 logging.getLogger('skfem').setLevel(logging.ERROR)
-if args.verbose <= 0:
+if args.verbose is not None and args.verbose <= 0:
     logging.getLogger('pycoimset').setLevel(logging.WARNING)
     logging.getLogger('space').setLevel(logging.INFO)
     logging.getLogger('pde.evaluator').setLevel(logging.INFO)
-elif args.verbose <= 1:
+elif args.verbose is None or args.verbose <= 1:
     logging.getLogger('pycoimset').setLevel(logging.INFO)
     logging.getLogger('space').setLevel(logging.DEBUG)
     logging.getLogger('pde.evaluator').setLevel(logging.DEBUG)
