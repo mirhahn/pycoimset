@@ -236,7 +236,7 @@ class PoissonEvaluator:
             f=self._f
         )
         sys = condense(A, b, D=self._spc.p1.get_dofs('dirichlet'))
-        solver = skfem.utils.solver_iter_pcg(atol=0, tol=1e-3)
+        solver = skfem.utils.solver_iter_pcg(atol=0, rtol=1e-3)
         result = cast(numpy.ndarray, solve(*sys, solver=solver))    # type: ignore
         time_end = time.perf_counter()
         self._stats.pdesol.time += time_end - time_start
@@ -258,7 +258,7 @@ class PoissonEvaluator:
             f=self._f
         )
         sys = condense(A, b, D=self._spc.p2.get_dofs('dirichlet'))
-        solver = skfem.utils.solver_iter_pcg(atol=0, tol=1e-3)
+        solver = skfem.utils.solver_iter_pcg(atol=0, rtol=1e-3)
         result = cast(numpy.ndarray, solve(*sys, solver=solver))    # type: ignore
         time_end = time.perf_counter()
         self._stats.qpdesol.time += time_end - time_start
