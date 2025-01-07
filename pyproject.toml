@@ -1,9 +1,9 @@
 [project]
 name = "pycoimset"
 dynamic = ["version"]
-description = "Python library for set-valued optimization"
+description = "Python library for optimization of sets"
 readme = "README.md"
-requires-python = "~= 3.11"
+requires-python = ">= 3.11"
 license = { file = "LICENSE.md" }
 authors = [ { name = "Mirko Hahn", email = "mirhahn@ovgu.de" } ]
 classifiers = [

@@ -408,18 +408,16 @@ class PoissonEvaluator:
         '''
         Evaluate objective to given tolerance.
         '''
-        while ((err := abs(numpy.sum((eta := self.objerr)).item()))
-               > self._tol.obj):
+        while ((err := abs(numpy.sum((eta := self.objerr)).item())) > self._tol.obj):
             logger.debug(f'objective error {err} exceeds tolerance {self._tol.obj}')
-            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.obj, max_frac=max(0.1, 0.1 * (err - self._tol.obj) / err))
+            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.obj, max_frac=0.1)
         return err
 
     def eval_grad(self) -> float:
         '''
         Evaluate objective to given tolerance.
         '''
-        while ((err := numpy.sum((eta := self.graderr)).item())
-               > self._tol.grad):
+        while ((err := numpy.sum((eta := self.graderr)).item()) > self._tol.grad):
             logger.debug(f'gradient error {err} exceeds tolerance {self._tol.grad}')
-            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.grad, max_frac=max(0.1, 0.1 * (err - self._tol.obj) / err))
+            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.grad, max_frac=0.1)
         return err
