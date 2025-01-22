@@ -347,6 +347,16 @@ class UnconstrainedSolver(Generic[Spc]):
         '''
         return self._p
 
+    def _callback(self) -> float:
+        '''
+        Run callback and return runtime.
+        '''
+        if (cb := self.callback) is not None:
+            start_time = get_time()
+            cb(self)
+            return get_time() - start_time
+        return 0.0
+
     @interruptible_method(signal.SIGINT | signal.SIGTERM)
     def solve(self, int_flag: InterruptionFlag) -> None:
         '''
@@ -357,6 +367,7 @@ class UnconstrainedSolver(Generic[Spc]):
         grad_val = make_grad_eval(self.f, cache_size=2)
 
         # Record start time.
+        cb_time = 0.0
         start_time = get_time()
 
         # Evaluate initial gradient.
@@ -374,15 +385,14 @@ class UnconstrainedSolver(Generic[Spc]):
 
         # Print initial log line.
         self._log.push_line(
-            time=get_time() - start_time,
+            time=get_time() - start_time - cb_time,
             iter=self._stats.n_iter,
             obj=(obj_val := func_val(self.x, math.inf)[0]),
             instat=instat
         )
         self._stats.last_obj_val = obj_val
         self._stats.last_instat = instat
-        if self.callback is not None:
-            self.callback(self)
+        cb_time += self._callback()
 
         # Main optimization loop
         old_iter = self._stats.n_iter
@@ -466,7 +476,7 @@ class UnconstrainedSolver(Generic[Spc]):
             # Print log line.
             if step_accepted:
                 self._log.push_line(
-                    time=get_time() - start_time,
+                    time=get_time() - start_time - cb_time,
                     iter=self._stats.n_iter,
                     obj=obj_val,
                     instat=instat,
@@ -476,8 +486,7 @@ class UnconstrainedSolver(Generic[Spc]):
                 self._stats.last_obj_val = obj_val
                 self._stats.last_instat = instat
                 old_reject = self._stats.n_reject
-                if self.callback is not None:
-                    self.callback(self)
+                cb_time += self._callback()
 
         if int_flag.deferred_signal is not None:
             self._status = SolverStatus.UserInterruption

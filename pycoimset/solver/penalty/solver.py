@@ -263,6 +263,16 @@ class PenaltySolver(Generic[Spc]):
             flush=True
         )
 
+    def _callback(self) -> float:
+        '''
+        Run callback and return runtime.
+        '''
+        if (cb := self.callback) is not None:
+            start_time = get_time()
+            cb(self)
+            return get_time() - start_time
+        return 0.0
+
     @interruptible_method(signals=signal.SIGINT | signal.SIGTERM)
     def solve(self, int_flg: InterruptionFlag) -> None:
         '''Run main loop until termination.'''
@@ -282,6 +292,7 @@ class PenaltySolver(Generic[Spc]):
         pen_grad = None
 
         # Record start time.
+        cb_time = 0.0
         start_time = get_time()
 
         # Evaluate initial infeasibility.
@@ -323,7 +334,7 @@ class PenaltySolver(Generic[Spc]):
 
         # Output initial iterate.
         self.logger.push_line(
-            time=get_time() - start_time,
+            time=get_time() - start_time - cb_time,
             iter=self.stats.n_iter,
             objval=self.f[-1](x, math.inf)[0],
             instat=tau,
@@ -333,8 +344,7 @@ class PenaltySolver(Generic[Spc]):
         self.status = type(self).Status.Running
 
         # Invoke callback if necessary.
-        if self.callback is not None:
-            self.callback(self)
+        cb_time += self._callback()
 
         start_iter = self.stats.n_iter
         old_reject = self.stats.n_reject
@@ -419,7 +429,7 @@ class PenaltySolver(Generic[Spc]):
             # Output log line and reset iteration rejection counter
             if step_accept:
                 self.logger.push_line(
-                    time=get_time() - start_time,
+                    time=get_time() - start_time - cb_time,
                     iter=self.stats.n_iter,
                     objval=f2,
                     instat=tau,
@@ -431,8 +441,7 @@ class PenaltySolver(Generic[Spc]):
                 old_reject = self.stats.n_reject
 
                 # Invoke callback if necessary.
-                if self.callback is not None:
-                    self.callback(self)
+                cb_time += self._callback()
         
         # Set status.
         if int_flg.deferred_signal is not None:
