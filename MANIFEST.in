@@ -1,2 +1,5 @@
-recursive-exclude examples/* run*.zip
-exclude .gitlab-ci.yaml
+prune .github
+prune doc
+prune examples
+global-exclude *.py[cod] *~
+exclude .git*
