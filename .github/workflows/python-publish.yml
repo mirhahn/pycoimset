@@ -23,8 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-tags: true
-          fetch-depth: 100      # It is assumed that 100 commits will contain a version tag. Can be removed if `workflow_dispatch` is removed.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
