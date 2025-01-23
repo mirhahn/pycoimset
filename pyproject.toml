@@ -26,3 +26,4 @@ requires = ["setuptools", "wheel", "setuptools_scm[toml]>=6.2"]
 include = ["pycoimset*"]
 
 [tool.setuptools_scm]
+local_scheme = "no-local-version"
