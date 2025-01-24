@@ -80,10 +80,11 @@ def update_pen_grad(
         instat_evaluator = eval_instat(arg.space)
 
     # Initial evaluation, short-circuit if feasible
-    grad, _, tau, err = eval_grad(pen_grad, arg, tol_instat, tr_rad, margin_instat,
-                                  margin_step, margin_proj_desc, step_qual, err_norm,
-                                  instat_eval=instat_evaluator, err_bnd=err_bnd,
-                                  err_decay=err_decay)
+    grad, _, tau, err = eval_grad(pen_grad, arg, tol_instat, tr_rad,
+                                  margin_instat, margin_step,
+                                  margin_proj_desc, step_qual, err_norm,
+                                  instat_eval=instat_evaluator,
+                                  err_bnd=err_bnd, err_decay=err_decay)
     if infeas <= tol_infeas:
         return grad, err, pen_param, pen_grad
 
@@ -120,5 +121,5 @@ def update_pen_grad(
                                       err_bnd=err_bnd,
                                       err_decay=err_decay,
                                       instat_eval=instat_evaluator)
-    
+
     return grad, err, pen_param, pen_grad

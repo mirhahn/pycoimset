@@ -42,7 +42,7 @@ class Operator(Enum):
     is_satisfied: Callable[[float], bool]
     is_strictly_satisfied: Callable[[float], bool]
     violation: Callable[[float], float]
-    
+
     def __init__(self,
                  loose_test: Callable[[float], bool],
                  strict_test: Callable[[float], bool],

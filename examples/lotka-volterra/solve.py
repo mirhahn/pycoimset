@@ -28,7 +28,10 @@ from pycoimset.solver.unconstrained.solver import SolverParameters
 
 import lotka_volterra.ext.scipy as scipy_ext
 from lotka_volterra.objective import LotkaObjectiveFunctional
-from lotka_volterra.space import IntervalSimilarityClass, IntervalSimilaritySpace
+from lotka_volterra.space import (
+    IntervalSimilarityClass,
+    IntervalSimilaritySpace
+)
 
 
 class Callback:

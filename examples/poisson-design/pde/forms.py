@@ -63,10 +63,10 @@ def a(u, v, w):
     w
         Control function.
     '''
-    return dot(k(w) * grad(u), grad(v)) # type: ignore
+    return dot(k(w) * grad(u), grad(v))     # type: ignore
 
 
-def a_w(u, v, dw = 1.0):
+def a_w(u, v, dw=1.0):
     '''
     Derivative of bilinear form with respect to control.
 

@@ -159,7 +159,7 @@ class IntervalSimilaritySpace(SimilaritySpace,
         Convert to JSON-compatible data type.
         '''
         start, end = self.time_range
-        return { 'start': start, 'end': end }
+        return {'start': start, 'end': end}
 
     @classmethod
     def fromJSON(cls, obj: dict | list) -> 'IntervalSimilaritySpace':
@@ -292,8 +292,9 @@ class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace],
     @property
     def measure(self) -> float:
         '''Measure of the class.'''
-        measure = numpy.sum(self.switch_times[1::2]
-                  - self.switch_times[:-1:2])
+        measure = numpy.sum(
+            self.switch_times[1::2] - self.switch_times[:-1:2]
+        )
         if measure < 0:
             raise RuntimeError()
         self.__dict__['measure'] = measure
@@ -355,12 +356,15 @@ class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace],
 
         return IntervalSimilarityClass(self._space, switch_times)
 
-    def __or__(self, other: SimilarityClass) -> 'IntervalSimilarityClass | NotImplementedType':
+    def __or__(self, other: SimilarityClass
+               ) -> 'IntervalSimilarityClass | NotImplementedType':
         '''Return union with another similarity class.'''
         if not isinstance(other, IntervalSimilarityClass):
             return NotImplemented
         if other._space is not self._space:
-            raise ValueError('`other` is not within the same similarity space')
+            raise ValueError(
+                '`other` is not within the same similarity space'
+            )
 
         # Get switching times such that `switch_a` is the smaller of the two
         # intervals.
@@ -397,28 +401,36 @@ class IntervalSimilarityClass(SimilarityClass[IntervalSimilaritySpace],
 
         return IntervalSimilarityClass(self._space, switch_times)
 
-    def __and__(self, other: SimilarityClass) -> 'IntervalSimilarityClass | NotImplementedType':
+    def __and__(self, other: SimilarityClass
+                ) -> 'IntervalSimilarityClass | NotImplementedType':
         if not isinstance(other, IntervalSimilarityClass):
             return NotImplemented
         if other.space is not self.space:
-            raise ValueError('`other` is not within the same similarity space')
+            raise ValueError(
+                '`other` is not within the same similarity space'
+            )
 
         return ~(~self | ~other)
 
-    def __sub__(self, other: SimilarityClass) -> 'IntervalSimilarityClass | NotImplementedType':
+    def __sub__(self, other: SimilarityClass
+                ) -> 'IntervalSimilarityClass | NotImplementedType':
         if not isinstance(other, IntervalSimilarityClass):
             return NotImplemented
         if other.space is not self.space:
-            raise ValueError('`other` is not within the same similarity space')
+            raise ValueError(
+                '`other` is not within the same similarity space'
+            )
 
         return self & ~other
 
-    def __rsub__(self, other: SimilarityClass) -> 'IntervalSimilarityClass | NotImplementedType':
+    def __rsub__(self, other: SimilarityClass
+                 ) -> 'IntervalSimilarityClass | NotImplementedType':
         if not isinstance(other, IntervalSimilarityClass):
             return NotImplemented
         return other.__sub__(self)
 
-    def __xor__(self, other: SimilarityClass) -> 'IntervalSimilarityClass | NotImplementedType':
+    def __xor__(self, other: SimilarityClass
+                ) -> 'IntervalSimilarityClass | NotImplementedType':
         if not isinstance(other, IntervalSimilarityClass):
             return NotImplemented
         if other.space is not self.space:
@@ -515,7 +527,10 @@ class PolynomialSignedMeasure(SignedMeasure[IntervalSimilaritySpace]):
         # Erase all roots outside the interval
         roots[roots <= start_times[:, None]] = numpy.nan
         roots[roots >= end_times[:, None]] = numpy.nan
-        roots = numpy.concatenate((start_times[:, None], roots, end_times[:, None]), axis=-1)
+        roots = numpy.concatenate(
+            (start_times[:, None], roots, end_times[:, None]),
+            axis=-1
+        )
 
         # Evaluate polynomials at points
         val = numpy.abs(traj.piece_eval(roots))
@@ -628,26 +643,30 @@ class PolynomialSignedMeasure(SignedMeasure[IntervalSimilaritySpace]):
     def __truediv__(self, divisor: float) -> 'PolynomialSignedMeasure':
         return PolynomialSignedMeasure(self._space, self._poly / divisor)
 
-    def __add__(self, other: SignedMeasure) -> 'PolynomialSignedMeasure | NotImplementedType':
+    def __add__(self, other: SignedMeasure
+                ) -> 'PolynomialSignedMeasure | NotImplementedType':
         if not isinstance(other, PolynomialSignedMeasure):
             return NotImplemented
         if other._space is not self._space:
             raise ValueError('Similarity space mismatch')
         return PolynomialSignedMeasure(self._space, self._poly + other._poly)
 
-    def __radd__(self, other: SignedMeasure) -> 'PolynomialSignedMeasure | NotImplementedType':
+    def __radd__(self, other: SignedMeasure
+                 ) -> 'PolynomialSignedMeasure | NotImplementedType':
         if not isinstance(other, PolynomialSignedMeasure):
             return NotImplemented
         return self.__add__(other)
 
-    def __sub__(self, other: SignedMeasure) -> 'PolynomialSignedMeasure | NotImplementedType':
+    def __sub__(self, other: SignedMeasure
+                ) -> 'PolynomialSignedMeasure | NotImplementedType':
         if not isinstance(other, PolynomialSignedMeasure):
             return NotImplemented
         if other._space is not self._space:
             raise ValueError('Similarity space mismatch')
         return PolynomialSignedMeasure(self._space, self._poly - other._poly)
 
-    def __rsub__(self, other: SignedMeasure) -> 'PolynomialSignedMeasure | NotImplementedType':
+    def __rsub__(self, other: SignedMeasure
+                 ) -> 'PolynomialSignedMeasure | NotImplementedType':
         if not isinstance(other, PolynomialSignedMeasure):
             return NotImplemented
         return other.__sub__(self)

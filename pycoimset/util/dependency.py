@@ -145,10 +145,12 @@ def tracks_dependencies(cls: Type[T]) -> Type[T]:
         if not isinstance(member, functools.cached_property):
             continue
         try:
-            deps = cast(tuple[QualifiedDependency], getattr(member, 'dependencies'))
+            deps = cast(tuple[QualifiedDependency],
+                        getattr(member, 'dependencies'))
             for dep in deps:
                 name = dep_str(dep.dep)
-                deps_map[name] = (*deps_map.get(name, tuple()), (member, dep.pred))
+                deps_map[name] = (*deps_map.get(name, tuple()),
+                                  (member, dep.pred))
         except AttributeError:
             pass
 
@@ -157,7 +159,11 @@ def tracks_dependencies(cls: Type[T]) -> Type[T]:
         stack = [*deps_map.get(prop, tuple())]
         visited = set()
         while len(stack) > 0:
-            child, pred = cast(tuple[functools.cached_property, Optional[Callable[[Any], bool]]], stack.pop())
+            child, pred = cast(
+                tuple[functools.cached_property,
+                      Optional[Callable[[Any], bool]]],
+                stack.pop()
+            )
             if (
                 child.attrname is None or child.func.__name__ in visited
                 or child.attrname not in self.__dict__

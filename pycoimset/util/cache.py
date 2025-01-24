@@ -157,10 +157,10 @@ def cached_method(
 
     Notes
     -----
-        Currently, only positional arguments are supported. This is a deliberate
-        choice to avoid situations where outputs for the same arguments are
-        cached multiple times based on whether certain arguments are positional
-        or keyword arguments.
+        Currently, only positional arguments are supported. This is a
+        deliberate choice to avoid situations where outputs for the same
+        arguments are cached multiple times based on whether certain arguments
+        are positional or keyword arguments.
     '''
     def decorator(func: Callable[[T, *Ts], V]) -> Callable[[T, *Ts], V]:
         '''
@@ -179,7 +179,8 @@ def cached_method(
         def cache_wrapper(self: T, *args: *Ts) -> V:
             # Retrieve cache
             try:
-                cache = cast(MutableMapping[tuple[*Ts], V], getattr(self, cache_name))
+                cache = cast(MutableMapping[tuple[*Ts], V],
+                             getattr(self, cache_name))
             except AttributeError:
                 if max_size is not None:
                     cache = LRUCache[tuple[*Ts], V](max_size=max_size)
@@ -201,7 +202,9 @@ def cached_method(
     return decorator
 
 
-def cached_external_property(max_size: int | None = None) -> Callable[[Callable[[T], V]], Callable[[T], V]]:
+def cached_external_property(max_size: int | None = None
+                             ) -> Callable[[Callable[[T], V]],
+                                           Callable[[T], V]]:
     '''
     Wraps a function of a single object in a cache wrapper.
 

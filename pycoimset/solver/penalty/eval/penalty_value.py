@@ -61,8 +61,8 @@ def eval_pen_summand(
         Output error bound. Must be strictly positive.
 
     val_err_bnd : float (optional, keyword-only)
-        Initial error bound for the functional evaluation loop. Must be strictly
-        positive. Can be infinite. Defaults to positive infinity.
+        Initial error bound for the functional evaluation loop. Must be
+        strictly positive. Can be infinite. Defaults to positive infinity.
 
     val_err_decay : float (optional, keyword-only)
         Error decay rate for the functional evaluation loop. Must be strictly
@@ -90,12 +90,23 @@ def eval_pen_summand(
 
 
 def eval_pen_func(
-    func_eval: list[Callable[[SimilarityClass[_Tspc], float], tuple[float, float]]],
+    func_eval: list[
+        Callable[
+            [SimilarityClass[_Tspc], float],
+            tuple[float, float]
+        ]
+    ],
     weights: ArrayLike | None = None,
     *,
     err_bnd: float = math.inf,
     err_decay: float = 0.5
-) -> Callable[[float], Callable[[SimilarityClass[_Tspc], float], tuple[float, float]]]:
+) -> Callable[
+    [float],
+    Callable[
+        [SimilarityClass[_Tspc], float],
+        tuple[float, float]
+    ]
+]:
     '''
     Penalty functional evaluator.
 
@@ -132,7 +143,8 @@ def eval_pen_func(
         weights = numpy.ones(len(func_eval))
     else:
         weights = numpy.broadcast_to(numpy.asarray(weights), len(func_eval))
-    weights = numpy.asarray(numpy.clip(weights, a_min=0.0, a_max=None, dtype=float))
+    weights = numpy.asarray(numpy.clip(weights, a_min=0.0, a_max=None,
+                                       dtype=float))
 
     def fix_pen_param(
         pen_param: float
@@ -145,7 +157,8 @@ def eval_pen_func(
         bnd_coeff[:-1] *= pen_param
         bnd_coeff /= bnd_coeff.sum()
 
-        def penalty_evaluator(arg: SimilarityClass[_Tspc], err_bnd: float) -> tuple[float, float]:
+        def penalty_evaluator(arg: SimilarityClass[_Tspc], err_bnd: float
+                              ) -> tuple[float, float]:
             if math.isinf(err_bnd):
                 bnd = numpy.full_like(bnd_coeff, numpy.inf)
             else:

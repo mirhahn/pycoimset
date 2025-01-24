@@ -16,10 +16,10 @@
 '''
 Parameter checking.
 
-This is a basis for a more sophisticated input checking system based on Python's
-TypedDict. It is intended to provide runtime type (and value) checking for
-parameter dictionaries read from JSON files based purely on type annotations
-and decorators attached to the parameter dictionaries.
+This is a basis for a more sophisticated input checking system based on
+Python's TypedDict. It is intended to provide runtime type (and value) checking
+for parameter dictionaries read from JSON files based purely on type
+annotations and decorators attached to the parameter dictionaries.
 '''
 
 from collections.abc import Callable, Mapping, Sequence
@@ -156,7 +156,8 @@ def import_typed_dict(value: Mapping[Any, Any], dict_type: Type[D], *,
 
     allow_unkown : bool (optional, keyword-only)
         Indicates that unknown keys are allowed to be contained in the
-        dictionary. Defaults to `False` to reflect the semantics of `TypedDict`.
+        dictionary. Defaults to `False` to reflect the semantics of
+        `TypedDict`.
 
     prefix : str (optional, keyword-only)
         Name prefix. Used in exception messages.
@@ -231,4 +232,3 @@ def import_typed_dict(value: Mapping[Any, Any], dict_type: Type[D], *,
 
     # Return result
     return dict_type(value)
-

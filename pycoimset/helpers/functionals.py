@@ -51,7 +51,7 @@ class ProxyBase(Functional[Spc], Generic[Spc]):
         obj = super().__new__(cls)
         obj._func = func
         return obj
-    
+
     @property
     def base_functional(self) -> Functional[Spc]:
         '''Underlying functional.'''
@@ -228,7 +228,7 @@ class with_safety_factor(ProxyBase[Spc], Generic[Spc]):
     def get_gradient(self) -> tuple[SignedMeasure[Spc], float]:
         grad, err = self._func.get_gradient()
         return grad, err * self._gfac
-    
+
 
 class weighted_sum(Functional[Spc], Generic[Spc]):
     '''
@@ -251,9 +251,13 @@ class weighted_sum(Functional[Spc], Generic[Spc]):
         self._gtype = func[0].grad_tol_type
         for f in func[1:]:
             if f.input_space is not self._spc:
-                raise ValueError('all components must use the same input space')
+                raise ValueError(
+                    'all components must use the same input space'
+                )
             if f.grad_tol_type is not self._gtype:
-                raise ValueError('all components must have the same error control type')
+                raise ValueError(
+                    'all components must have the same error control type'
+                )
         self._f = func
         self._c = numpy.broadcast_to(numpy.asarray(coef, dtype=float),
                                      len(func))
@@ -267,7 +271,7 @@ class weighted_sum(Functional[Spc], Generic[Spc]):
     def __len__(self) -> int:
         '''Number of components.'''
         return len(self._f)
-    
+
     def __getitem__(self, idx: int) -> Functional[Spc]:
         '''Component functional.'''
         return self._f[idx]
@@ -276,12 +280,12 @@ class weighted_sum(Functional[Spc], Generic[Spc]):
     def input_space(self) -> Spc:
         '''Input space.'''
         return self._spc
-    
+
     @property
     def arg(self) -> Optional[SimilarityClass[Spc]]:
         '''Current argument.'''
         return self._f[0].arg
-    
+
     @arg.setter
     def arg(self, arg: Optional[SimilarityClass[Spc]]) -> None:
         for f in self._f:
@@ -292,7 +296,7 @@ class weighted_sum(Functional[Spc], Generic[Spc]):
     def val_tol(self) -> float:
         '''Value tolerance.'''
         return self._vtol
-    
+
     @val_tol.setter
     def val_tol(self, tol: float) -> None:
         self._vtol = tol
@@ -308,7 +312,7 @@ class weighted_sum(Functional[Spc], Generic[Spc]):
     def grad_tol(self) -> float:
         '''Gradient tolerance.'''
         return self._gtol
-    
+
     @grad_tol.setter
     def grad_tol(self, tol: float) -> None:
         self._gtol = tol
@@ -324,7 +328,7 @@ class weighted_sum(Functional[Spc], Generic[Spc]):
     def grad_tol_type(self) -> ErrorNorm:
         '''Type of error control.'''
         return self._gtype
-    
+
     def get_value(self) -> tuple[float, float]:
         '''Return value-error pair.'''
         val = numpy.empty(len(self._f), dtype=float)
@@ -332,7 +336,7 @@ class weighted_sum(Functional[Spc], Generic[Spc]):
         for i, f in enumerate(self._f):
             val[i], err[i] = f.get_value()
         return numpy.inner(self._c, val), numpy.inner(numpy.abs(self._c), err)
-    
+
     def get_gradient(self) -> tuple[SignedMeasure[Spc], float]:
         '''Return gradient-error pair.'''
         grad = None

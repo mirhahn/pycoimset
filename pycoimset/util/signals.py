@@ -43,8 +43,11 @@ def interruptible_method(signals: int) -> Callable[
         def wrapped_func(self, *args: P.args, **kwargs: P.kwargs) -> R:
             # Install signal handler
             flag = InterruptionFlag()
+
             def handler(signum: int, _):
+                nonlocal flag
                 flag.deferred_signal = signum
+
             hdl = signal.signal(signals, handler)
 
             # Execute wrapped function, reset signal handler, reraise signal.
@@ -56,7 +59,6 @@ def interruptible_method(signals: int) -> Callable[
                     signal.raise_signal(sig)
         return wrapped_func
     return decorator
-
 
 
 __interrupt: bool = False
@@ -89,7 +91,9 @@ def defer_sigint():
     '''Defer SIGINT until end of block.'''
     # Set up dummy handler.
     signal_received = None
+
     def handler(*args):
+        nonlocal signal_received
         signal_received = args
 
     # Install dummy handler.

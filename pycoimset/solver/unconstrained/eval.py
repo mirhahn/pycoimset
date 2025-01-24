@@ -33,7 +33,8 @@ _Tspc = TypeVar('_Tspc', bound=SimilaritySpace)
 
 
 def eval_instat(_: _Tspc, cache_size: int | None = 1
-                ) -> Callable[[SignedMeasure[_Tspc]], tuple[SimilarityClass[_Tspc], float]]:
+                ) -> Callable[[SignedMeasure[_Tspc]],
+                              tuple[SimilarityClass[_Tspc], float]]:
     '''
     Cached instationarity evaluator.
 
@@ -56,7 +57,8 @@ def eval_instat(_: _Tspc, cache_size: int | None = 1
 
 
 def make_func_eval(func: Functional[_Tspc], *, cache_size: int = 2
-                   ) -> Callable[[SimilarityClass[_Tspc], float], tuple[float, float]]:
+                   ) -> Callable[[SimilarityClass[_Tspc], float],
+                                 tuple[float, float]]:
     '''
     Create a simplified, possibly cached evaluator for a functional.
 
@@ -141,8 +143,9 @@ def eval_rho(eval_func: Callable[
     Arguments
     ---------
     eval_func : (SimilarityClass, float) -> (float, float)
-        Controlled evaluator for the objective functional. Receives a similarity
-        class and an error bound and returns an evaluate and an error bound.
+        Controlled evaluator for the objective functional. Receives a
+        similarity class and an error bound and returns an evaluate and an
+        error bound.
 
     gradient : SignedMeasure
         Evaluated gradient. Must assign strictly negative measure to the step
@@ -162,12 +165,13 @@ def eval_rho(eval_func: Callable[
 
     set_end : SimilarityClass (optional)
         End point of the step. If `None`, it is calculated from `set_start` and
-        `set_step`. Pre-calculation is recommended to avoid multiple evaluation.
-        Defaults to `None`.
+        `set_step`. Pre-calculation is recommended to avoid multiple
+        evaluation. Defaults to `None`.
 
     err_bnd : float (optional, keyword-only)
-        Initial error bound for the controlled evaluation loop. Must be strictly
-        greater than zero. Can be infinite. Defaults to positive infinity.
+        Initial error bound for the controlled evaluation loop. Must be
+        strictly greater than zero. Can be infinite. Defaults to positive
+        infinity.
 
     err_decay : float (optional, keyword-only)
         Error decay rate for the controlled evaluation loop. Must be strictly
@@ -176,7 +180,7 @@ def eval_rho(eval_func: Callable[
     Returns
     -------
     (f1, e1, f2, e2, rho) : tuple of 5 floats
-    
+
         f1 : float
             Functional value at start point.
 
@@ -330,16 +334,28 @@ def eval_grad(
         instat_eval = eval_instat(set_cur.space)
 
     # Inner evaluator
-    def phi(beta: float) -> tuple[tuple[SignedMeasure[_Tspc], SimilarityClass[_Tspc], float, float], float]:
+    def phi(beta: float) -> tuple[
+        tuple[SignedMeasure[_Tspc],
+              SimilarityClass[_Tspc],
+              float,
+              float],
+        float
+    ]:
         g, e = grad(set_cur, beta)
         set_neg, tau = instat_eval(g)
         return (g, set_neg, tau, e), e
 
     # Bound oracle
-    def omega(val: tuple[SignedMeasure[_Tspc], SimilarityClass[_Tspc], float, float]) -> float:
+    def omega(val: tuple[SignedMeasure[_Tspc],
+                         SimilarityClass[_Tspc],
+                         float,
+                         float]) -> float:
         g, set_neg, tau, e = val
         omega_tau = xi_tau * max(instat_tol, tau - instat_tol)
-        proj_chg_bnd = (1 - xi_delta) * step_qual * (tr_rad / max(tr_rad, set_neg.measure)) * max(tau, instat_tol)
+        proj_chg_bnd = (
+            (1 - xi_delta) * step_qual
+            * (tr_rad / max(tr_rad, set_neg.measure)) * max(tau, instat_tol)
+        )
         omega_d = xi_g * proj_chg_bnd
 
         if err_norm is ErrorNorm.L1:

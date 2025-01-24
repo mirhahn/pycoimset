@@ -45,7 +45,11 @@ from skfem import (
 import skfem
 import skfem.utils
 
-from pycoimset.util import depends_on, notify_property_update, tracks_dependencies
+from pycoimset.util import (
+    depends_on,
+    notify_property_update,
+    tracks_dependencies
+)
 
 from .forms import L, a, a_w, e_fac, e_int, ge_int
 
@@ -53,12 +57,15 @@ from .forms import L, a, a_w, e_fac, e_int, ge_int
 logger = logging.getLogger(__name__)
 
 
-def refine_mesh(mesh: skfem.MeshTri, wgt: NDArray[float_], tol: float, max_frac: Optional[float] = None) -> skfem.MeshTri:
+def refine_mesh(mesh: skfem.MeshTri, wgt: NDArray[float_], tol: float,
+                max_frac: Optional[float] = None) -> skfem.MeshTri:
     sort_idx = numpy.argsort(wgt)
     sorted_wgt = wgt[sort_idx]
-    split_idx = numpy.searchsorted(sorted_wgt, tol / len(sorted_wgt), side='right')
+    split_idx = numpy.searchsorted(sorted_wgt, tol / len(sorted_wgt),
+                                   side='right')
     if max_frac is not None:
-        split_idx = max(int(split_idx), math.floor((1 - max_frac) * len(sorted_wgt)))
+        split_idx = max(int(split_idx),
+                        math.floor((1 - max_frac) * len(sorted_wgt)))
     where = sort_idx[split_idx:]
     return cast(skfem.MeshTri, mesh.refined(where))
 
@@ -237,7 +244,8 @@ class PoissonEvaluator:
         )
         sys = condense(A, b, D=self._spc.p1.get_dofs('dirichlet'))
         solver = skfem.utils.solver_iter_pcg(atol=0, rtol=1e-3)
-        result = cast(numpy.ndarray, solve(*sys, solver=solver))    # type: ignore
+        result = cast(numpy.ndarray,
+                      solve(*sys, solver=solver))    # type: ignore
         time_end = time.perf_counter()
         self._stats.pdesol.time += time_end - time_start
         self._stats.pdesol.num += 1
@@ -259,7 +267,8 @@ class PoissonEvaluator:
         )
         sys = condense(A, b, D=self._spc.p2.get_dofs('dirichlet'))
         solver = skfem.utils.solver_iter_pcg(atol=0, rtol=1e-3)
-        result = cast(numpy.ndarray, solve(*sys, solver=solver))    # type: ignore
+        result = cast(numpy.ndarray,
+                      solve(*sys, solver=solver))   # type: ignore
         time_end = time.perf_counter()
         self._stats.qpdesol.time += time_end - time_start
         self._stats.qpdesol.num += 1
@@ -408,16 +417,22 @@ class PoissonEvaluator:
         '''
         Evaluate objective to given tolerance.
         '''
-        while ((err := abs(numpy.sum((eta := self.objerr)).item())) > self._tol.obj):
-            logger.debug(f'objective error {err} exceeds tolerance {self._tol.obj}')
-            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.obj, max_frac=0.1)
+        while ((err := abs(numpy.sum((eta := self.objerr)).item()))
+               > self._tol.obj):
+            logger.debug(f'objective error {err} exceeds tolerance '
+                         f'{self._tol.obj}')
+            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.obj,
+                                    max_frac=0.1)
         return err
 
     def eval_grad(self) -> float:
         '''
         Evaluate objective to given tolerance.
         '''
-        while ((err := numpy.sum((eta := self.graderr)).item()) > self._tol.grad):
-            logger.debug(f'gradient error {err} exceeds tolerance {self._tol.grad}')
-            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.grad, max_frac=0.1)
+        while ((err := numpy.sum((eta := self.graderr)).item())
+               > self._tol.grad):
+            logger.debug(f'gradient error {err} exceeds tolerance '
+                         f'{self._tol.grad}')
+            self.mesh = refine_mesh(self.mesh, numpy.abs(eta), self._tol.grad,
+                                    max_frac=0.1)
         return err

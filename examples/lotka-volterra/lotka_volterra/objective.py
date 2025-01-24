@@ -249,7 +249,9 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
             t0, tf = self._ivp.fwd.time_range
             dt = tf - t0
             self._reltol = float(100 * numpy.finfo(float).eps)
-            self._abstol = min(self.val_tol / dt, self.grad_tol / (2 * dt), 1e-6)
+            self._abstol = min(self.val_tol / dt,
+                               self.grad_tol / (2 * dt),
+                               1e-6)
         return self._abstol, self._reltol
 
     @_inttol.setter
@@ -344,7 +346,8 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
             # Reduce integration tolerances.
             atol *= self._valtol / (2 * val_err)
             self._inttol = (atol, rtol)
-            logger.debug(f"Retrying objective evaluation with tolerances {self._inttol}")
+            logger.debug("Retrying objective evaluation with tolerances "
+                         f"{self._inttol}")
 
             traj_ctrl = []
             traj_fwd = []
@@ -514,7 +517,8 @@ class LotkaObjectiveFunctional(Functional[IntervalSimilaritySpace]):
             self._val_result = None
             self.get_value()
             atol, rtol = self._inttol
-            logger.debug(f"Retrying gradient evaluation with tolerances {self._inttol}")
+            logger.debug("Retrying gradient evaluation with tolerances "
+                         f"{self._inttol}")
 
         # Once done, store trajectories.
         self._traj.adj = traj_adj

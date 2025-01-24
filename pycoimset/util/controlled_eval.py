@@ -76,7 +76,9 @@ def controlled_eval(
     if err_bnd <= 0.0:
         raise ValueError('Initial error bound must be strictly positive.')
     if err_decay <= 0.0 or err_decay >= 1.0:
-        raise ValueError('Error decay rate must be strictly between 0.0 and 1.0.')
+        raise ValueError(
+            'Error decay rate must be strictly between 0.0 and 1.0.'
+        )
 
     # Initial evaluation
     val, err = eval_func(err_bnd)

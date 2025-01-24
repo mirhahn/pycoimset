@@ -214,7 +214,7 @@ class SolverStatus(IntEnum):
     @property
     def is_error(self) -> bool:
         return self >= SolverStatus.UnknownError
-    
+
     @property
     def message(self) -> str:
         '''Describe status.'''
@@ -399,8 +399,12 @@ class UnconstrainedSolver(Generic[Spc]):
         old_reject = self._stats.n_reject
         max_iter = self._p.max_iter
         self._status = SolverStatus.Running
-        while instat > eps_tau and int_flag.deferred_signal is None and \
-            (max_iter is None or self._stats.n_iter - old_iter < max_iter):
+        while (
+            instat > eps_tau
+            and int_flag.deferred_signal is None
+            and (max_iter is None
+                 or self._stats.n_iter - old_iter < max_iter)
+        ):
             # Find step.
             self._step.gradient = g
             self._step.radius = tr_rad
@@ -410,7 +414,9 @@ class UnconstrainedSolver(Generic[Spc]):
             set_next = set_cur ^ set_step
 
             if isinstance(set_next, NotImplementedType):
-                raise NotImplementedError('symmetric difference not implemented')
+                raise NotImplementedError(
+                    'symmetric difference not implemented'
+                )
 
             # Find projected change.
             (_, _, obj_next, _, rho), e_rho = eval_rho(

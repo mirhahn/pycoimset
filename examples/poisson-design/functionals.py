@@ -175,5 +175,7 @@ class ObjectiveFunctional(pycoimset.Functional[SimilaritySpace]):
         eval.eval_grad()
 
         dof = -(2 * eval.ctrl - 1) * eval.grad / eval.vol
-        grad = SignedMeasure(self.input_space, Mesh(eval.mesh, parent=self.arg.mesh), dof)
+        grad = SignedMeasure(self.input_space,
+                             Mesh(eval.mesh, parent=self.arg.mesh),
+                             dof)
         return grad, numpy.abs(eval.graderr).sum()

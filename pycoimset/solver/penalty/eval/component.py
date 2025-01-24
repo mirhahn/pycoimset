@@ -74,7 +74,8 @@ def adapt_grad_eval(
             return grad, err * spc_meas
         return wrapped_evaluator
     else:
-        raise ValueError(f'Cannot convert control norm from {from_norm} to {to_norm}')
+        raise ValueError(f'Cannot convert control norm from {from_norm} to '
+                         f'{to_norm}')
 
 
 def make_component_eval(
@@ -83,7 +84,12 @@ def make_component_eval(
     cache_size: int
 ) -> tuple[
     list[Callable[[SimilarityClass[_Tspc], float], tuple[float, float]]],
-    list[Callable[[SimilarityClass[_Tspc], float], tuple[SignedMeasure[_Tspc], float]]],
+    list[
+        Callable[
+            [SimilarityClass[_Tspc], float],
+            tuple[SignedMeasure[_Tspc], float]
+        ]
+    ],
     ErrorNorm
 ]:
     '''
@@ -93,7 +99,8 @@ def make_component_eval(
     By generating all evaluators once and reusing them in multiple higher-order
     evaluators, cache can be shared between all evaluators.
 
-    By convention, the objective is assigned the last place in the output lists.
+    By convention, the objective is assigned the last place in the output
+    lists.
 
     Arguments
     ---------
@@ -111,7 +118,8 @@ def make_component_eval(
     func_eval : list of (SimilarityClass[S], float) -> (float, float)
         List of simplified functional evaluators.
 
-    grad_eval : list of (SimilarityClass[S], float) -> (SignedMeasure[S], float)
+    grad_eval : list of
+                (SimilarityClass[S], float) -> (SignedMeasure[S], float)
         List of simplified gradient evaluators.
 
     err_norm : ErrorNorm
@@ -127,8 +135,11 @@ def make_component_eval(
     grad_eval = {}
 
     # Determine gradient control norm.
-    err_norm = ErrorNorm.L1 if any((func.grad_tol_type is ErrorNorm.L1 for func in funcs)) \
+    err_norm = (
+        ErrorNorm.L1
+        if any((func.grad_tol_type is ErrorNorm.L1 for func in funcs))
         else ErrorNorm.Linfty
+    )
 
     for func in funcs:
         if id(func) not in func_eval:

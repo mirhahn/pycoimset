@@ -19,7 +19,6 @@
 import argparse
 import json
 import os
-from re import A
 from typing import Sequence
 
 from numpy.typing import ArrayLike, NDArray
@@ -69,7 +68,8 @@ lotka_volterra.ext.scipy.register_extensions()
 # Parse command line arguments.
 parser = argparse.ArgumentParser()
 parser.add_argument('sol_file', nargs='*', type=str, help='Solution files.')
-parser.add_argument('-e', '--ext', type=str, help='Save plot with new extension')
+parser.add_argument('-e', '--ext', type=str,
+                    help='Save plot with new extension')
 args = parser.parse_args()
 
 for sol in args.sol_file:

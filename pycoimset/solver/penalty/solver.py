@@ -138,11 +138,11 @@ class PenaltySolver(Generic[Spc]):
     class Status(Enum):
         _ignore_ = ['Message']
 
-        Running          = -1
-        Solved           = 0
-        Infeasible       = 1
+        Running = -1
+        Solved = 0
+        Infeasible = 1
         IterationMaximum = 2
-        SmallStep        = 3
+        SmallStep = 3
         UserInterruption = 4
 
         Message: dict[Self, str]
@@ -183,7 +183,12 @@ class PenaltySolver(Generic[Spc]):
 
     space: Spc
     f: list[Callable[[SimilarityClass[Spc], float], tuple[float, float]]]
-    f_grad: list[Callable[[SimilarityClass[Spc], float], tuple[SignedMeasure[Spc], float]]]
+    f_grad: list[
+        Callable[
+            [SimilarityClass[Spc], float],
+            tuple[SignedMeasure[Spc], float]
+        ]
+    ]
     x: SimilarityClass[Spc]
     mu: float
     tr_rad: float
@@ -221,25 +226,42 @@ class PenaltySolver(Generic[Spc]):
         self.f, self.f_grad, self._norm = make_component_eval(
             obj, *(constr_func(con) for con in cons), cache_size=2
         )
-        
+
         # Set up remaining state
         self.space = obj.input_space
         self.x = x0 if x0 is not None else obj.input_space.empty_class
         self.mu = mu if mu is not None else 1.0
         self._p = param if param is not None else type(self).Parameters()
-        self._step = step if step is not None else SteepestDescentStepFinder[Spc]()
-        self._errwgt = numpy.broadcast_to(err_wgt if err_wgt is not None else 1.0, len(self.f))
-        self._graderrwgt = numpy.broadcast_to(grad_err_wgt if grad_err_wgt is not None else self._errwgt, len(self.f))
+        self._step = (
+            step if step is not None
+            else SteepestDescentStepFinder[Spc]()
+        )
+        self._errwgt = numpy.broadcast_to(
+            err_wgt
+            if err_wgt is not None
+            else 1.0,
+            len(self.f)
+        )
+        self._graderrwgt = numpy.broadcast_to(
+            grad_err_wgt
+            if grad_err_wgt is not None
+            else self._errwgt,
+            len(self.f)
+        )
 
-        self.tr_rad = tr_rad if (tr_rad := self._p.tr_radius) is not None else \
-            obj.input_space.measure
+        self.tr_rad = (
+            tr_rad
+            if (tr_rad := self._p.tr_radius) is not None
+            else obj.input_space.measure
+        )
         self.status = type(self).Status.Running
         self.stats = type(self).Stats()
         self.callback = callback
 
         # Set up logger.
         self.logger = TabularLogger(
-            ['time', 'iter', 'objval', 'instat', 'infeas', 'penalty', 'step', 'rejected'],
+            ['time', 'iter', 'objval', 'instat', 'infeas', 'penalty', 'step',
+             'rejected'],
             format={
                 'time': '8.2f',
                 'iter': '4d',
@@ -313,8 +335,9 @@ class PenaltySolver(Generic[Spc]):
             x,
             p.feas_tol,
             p.abstol,
-            eps_rel if (eps_rel := p.relaxed_abstol) is not None \
-                else 10 * p.abstol,
+            (eps_rel
+             if (eps_rel := p.relaxed_abstol) is not None
+             else 10 * p.abstol),
             p.margin_instat,
             p.margin_step,
             p.margin_proj_desc,
@@ -354,13 +377,18 @@ class PenaltySolver(Generic[Spc]):
             # Get next step
             step.gradient = grad
             step.radius = tr_rad
-            step.tolerance = p.margin_step * step.quality * (tr_rad / max(tr_rad, set_neg.measure)) * tau
+            step.tolerance = (
+                p.margin_step * step.quality
+                * (tr_rad / max(tr_rad, set_neg.measure)) * tau
+            )
             d, _ = step.get_step()
 
             # Calculate step quality
             xs = x ^ d
             if isinstance(xs, NotImplementedType):
-                raise NotImplementedError('Symmetric difference not implemented')
+                raise NotImplementedError(
+                    'Symmetric difference not implemented'
+                )
             (*_, f2, _, rho), err_rho = eval_rho(
                 pen_val,
                 grad,
@@ -406,8 +434,9 @@ class PenaltySolver(Generic[Spc]):
                 x,
                 p.feas_tol,
                 p.abstol,
-                eps_rel if (eps_rel := p.relaxed_abstol) is not None \
-                    else 10 * p.abstol,
+                (eps_rel
+                 if (eps_rel := p.relaxed_abstol) is not None
+                 else 10 * p.abstol),
                 p.margin_instat,
                 p.margin_step,
                 p.margin_proj_desc,
@@ -442,7 +471,7 @@ class PenaltySolver(Generic[Spc]):
 
                 # Invoke callback if necessary.
                 cb_time += self._callback()
-        
+
         # Set status.
         if int_flg.deferred_signal is not None:
             self.status = type(self).Status.UserInterruption

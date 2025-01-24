@@ -39,7 +39,8 @@ class Callback:
     _tmpl: str
     obj_func: ObjectiveFunctional
 
-    def __init__(self, func: ObjectiveFunctional, file: str = 'iterate_{idx:04d}.vtk'):
+    def __init__(self, func: ObjectiveFunctional,
+                 file: str = 'iterate_{idx:04d}.vtk'):
         self._tmpl = file
         self.obj_func = func
 
@@ -48,18 +49,20 @@ class Callback:
         sol = solver.x
         if not isinstance(sol, BoolArrayClass):
             return
-       
+
         (obj_func := self.obj_func).arg = sol
         obj_func.get_value()
         obj_func.get_gradient()
         eval = obj_func.evaluator
-        
+
         # Retrieve evaluation mesh
         mesh = obj_func.evaluator.mesh
-        
+
         # Generate meshio mesh.
         mesh = meshio.Mesh(
-            numpy.vstack((mesh.p, numpy.broadcast_to(0, (1, mesh.nvertices)))).T,
+            numpy.vstack(
+                (mesh.p, numpy.broadcast_to(0, (1, mesh.nvertices)))
+            ).T,
             cells={
                 'triangle': mesh.t.T
             },
@@ -72,7 +75,7 @@ class Callback:
                 'grad': [(1 - 2 * eval.ctrl) * (eval.grad / eval.vol)]
             }
         )
-        
+
         # Write to file.
         mesh.write(self._tmpl.format(idx=solver.stats.n_iter))
 
@@ -115,7 +118,7 @@ else:
     logging.getLogger('pde.evaluator').setLevel(logging.DEBUG)
 
 # Set resource limits and convert warnings to exceptions.
-#resource.setrlimit(resource.RLIMIT_DATA, (2 * 2**30, 3 * 2**30))
+# resource.setrlimit(resource.RLIMIT_DATA, (2 * 2**30, 3 * 2**30))
 warnings.simplefilter('error')
 
 # Extract parameters.
@@ -172,11 +175,13 @@ elif sol_type == 'penalty':
     sol_param = PenaltySolver.Parameters(**sol_param)
     obj = ObjectiveFunctional(space)
 
-    # NOTE: With PenaltySolver, objective comes last. Hence, err_wgt is reversed.
+    # NOTE: With PenaltySolver, objective comes last. Hence, err_wgt is
+    # reversed.
     solver = PenaltySolver(
         with_safety_factor(obj,
                            prob_param.setdefault('safety_factor', 0.05)),
-        MeasureFunctional(space) <= prob_param.setdefault('measure_bound', 0.4),
+        MeasureFunctional(space) <= prob_param.setdefault('measure_bound',
+                                                          0.4),
         x0=ctrl,
         mu=prob_param.setdefault('mu_init', 0.01),
         err_wgt=[0.0, 1.0],

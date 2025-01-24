@@ -47,7 +47,8 @@ logger = logging.getLogger(__name__)
 M = TypeVar('M', bound=skfem.MeshTri1)
 
 
-def solve_subset_sum(weight: NDArray[float_], bnd: float, eps: float) -> NDArray[int_]:
+def solve_subset_sum(weight: NDArray[float_], bnd: float, eps: float
+                     ) -> NDArray[int_]:
     '''
     Approximately solve subset sum problem using dynamic programming.
     '''
@@ -57,7 +58,10 @@ def solve_subset_sum(weight: NDArray[float_], bnd: float, eps: float) -> NDArray
 
     lst: list[tuple[float, list[int]]] = [(0, [])]
     for i, w in enumerate(weight):
-        u = sorted(lst + [(y + w, p + [i]) for y, p in lst], key=(lambda el: el[0]))    # type: ignore
+        u = sorted(
+            lst + [(y + w, p + [i]) for y, p in lst],
+            key=(lambda el: el[0])
+        )    # type: ignore
         y, p = u[0]
         lst = [(y, p)]
         for z, p in u[1:]:
@@ -98,7 +102,11 @@ class Mesh(Generic[M]):
         if parent is None:
             self._parent = None
         else:
-            parent._children.add(weakref.hashref(self, weakref.weak_key_deleter(parent._children)))
+            parent._children.add(
+                weakref.hashref(
+                    self, weakref.weak_key_deleter(parent._children)
+                )
+            )
             self._parent = weakref.ref(parent, clear_parent)
 
     @cached_property
@@ -179,7 +187,9 @@ class Mesh(Generic[M]):
         cell_idx = numpy.empty(centroids.shape[1], dtype=int)
         start_idx = 0
         finder = self.mesh.element_finder()
-        for arr in numpy.array_split(centroids, math.ceil(centroids.shape[1] / 100), axis=1):
+        for arr in numpy.array_split(centroids,
+                                     math.ceil(centroids.shape[1] / 100),
+                                     axis=1):
             end_idx = start_idx + arr.shape[1]
             cell_idx[start_idx:end_idx] = finder(*arr)
             start_idx = end_idx
@@ -354,7 +364,8 @@ class BoolArrayClass(SimilarityClass[SimilaritySpace], MeshDependent):
                                     min((meas_high - meas_low) / 2,
                                         min_meas) / 2)
             flag[tind_sort[end:][pick]] = True
-            meas_total = meas_base + cast(float, numpy.sum(meas_sort[end:][pick]))
+            meas_total = meas_base + cast(float,
+                                          numpy.sum(meas_sort[end:][pick]))
 
             if meas_total >= meas_low:
                 break
@@ -464,9 +475,9 @@ class BoolArrayClass(SimilarityClass[SimilaritySpace], MeshDependent):
             hint = None
 
         # Call subroutine based on availability of hint.
-        #if hint is None:
-        #    return self._subset_nohint(meas_low, meas_high)
-        #return self._subset_hint(meas_low, meas_high, hint)
+        # if hint is None:
+        #     return self._subset_nohint(meas_low, meas_high)
+        # return self._subset_hint(meas_low, meas_high, hint)
         return self._subset_nohint(meas_low, meas_high)
 
     def __invert__(self) -> 'BoolArrayClass':
@@ -577,10 +588,13 @@ class SignedMeasure(pycoimset.typing.SignedMeasure, MeshDependent):
             p0, g=p0.interpolate(self.dof)
         )
 
-    def __call__(self, simcls: pycoimset.SimilarityClass[SimilaritySpace]) -> float:
+    def __call__(self, simcls: pycoimset.SimilarityClass[SimilaritySpace]
+                 ) -> float:
         '''Return measure of a similarity class.'''
         if not isinstance(simcls, BoolArrayClass):
-            raise NotImplementedError(f'Cannot measure {type(simcls).__name__}')
+            raise NotImplementedError(
+                f'Cannot measure {type(simcls).__name__}'
+            )
 
         # Ensure that both objects share a similarity space.
         if self.space is not simcls.space:

@@ -36,7 +36,10 @@ _Tspc = TypeVar('_Tspc', bound=SimilaritySpace)
 
 def eval_pen_grad_summand(
     con_eval: Callable[[SimilarityClass[_Tspc], float], tuple[float, float]],
-    con_grad_eval: Callable[[SimilarityClass[_Tspc], float], tuple[SignedMeasure[_Tspc], float]],
+    con_grad_eval: Callable[
+        [SimilarityClass[_Tspc], float],
+        tuple[SignedMeasure[_Tspc], float]
+    ],
     arg: SimilarityClass[_Tspc],
     pen_param: float,
     pen_grad_err_bnd: float,
@@ -75,8 +78,8 @@ def eval_pen_grad_summand(
     grad_err_bnd : float (optional, keyword-only)
         Initial error bound for the constraint functional gradient. Passed on
         to the evaluation loop as an initial bound. Must be strictly positive
-        unless all evaluators return an error estimate of zero. Can be infinite.
-        Defaults to positive infinity.
+        unless all evaluators return an error estimate of zero. Can be
+        infinite. Defaults to positive infinity.
 
     grad_err_decay: float (optional, keyword-only)
         Error decay rate for the controlled evaluation loop. Must be strictly
@@ -105,16 +108,25 @@ def eval_pen_grad_summand(
         'L1' if err_norm is ErrorNorm.L1 \
         else 'Linfty'
 
-    def inner_eval(err_bnd: float) -> tuple[tuple[SignedMeasure[_Tspc], float, float], float]:
+    def inner_eval(err_bnd: float) -> tuple[
+        tuple[SignedMeasure[_Tspc], float, float],
+        float
+    ]:
         grad, err_grad = con_grad_eval(arg, err_bnd)
-        val, err_val = con_eval(arg, val_err_decay * pen_grad_err_bnd / max(val_denom_eps, pen_param * grad.norm(norm_type)))
+        val, err_val = con_eval(
+            arg, (val_err_decay * pen_grad_err_bnd
+                  / max(val_denom_eps, pen_param * grad.norm(norm_type)))
+        )
         return (grad, val, err_val), err_grad
 
     def bound_func(val: tuple[SignedMeasure[_Tspc], float, float]) -> float:
         grad, func, err_func = val
         denom = pen_param * (max(0, func) + err_func)
         if denom > 0:
-            return (grad_err_bnd - pen_param * err_func * grad.norm(norm_type)) / denom
+            return (
+                (grad_err_bnd - pen_param * err_func * grad.norm(norm_type))
+                / denom
+            )
         else:
             return math.inf
 
@@ -128,8 +140,18 @@ def eval_pen_grad_summand(
 
 
 def eval_pen_grad(
-    func_eval: list[Callable[[SimilarityClass[_Tspc], float], tuple[float, float]]],
-    grad_eval: list[Callable[[SimilarityClass[_Tspc], float], tuple[SignedMeasure[_Tspc], float]]],
+    func_eval: list[
+        Callable[
+            [SimilarityClass[_Tspc], float],
+            tuple[float, float]
+        ]
+    ],
+    grad_eval: list[
+        Callable[
+            [SimilarityClass[_Tspc], float],
+            tuple[SignedMeasure[_Tspc], float]
+        ]
+    ],
     err_norm: ErrorNorm,
     weights: ArrayLike | None = None,
     *,
@@ -138,7 +160,13 @@ def eval_pen_grad(
     val_err_decay: float = 0.1,
     val_denom_eps: float = 0.1,
     cache_size: int = 2
-) -> Callable[[float], Callable[[SimilarityClass[_Tspc], float], tuple[SignedMeasure[_Tspc], float]]]:
+) -> Callable[
+    [float],
+    Callable[
+        [SimilarityClass[_Tspc], float],
+        tuple[SignedMeasure[_Tspc], float]
+    ]
+]:
     '''
     Create a penalty gradient evaluator.
 
@@ -148,7 +176,8 @@ def eval_pen_grad(
         List of functional evaluators. Must not be empty. Last element is
         assumed to be the objective functional.
 
-    grad_eval : list of (SimilarityClass[S], float) -> (SignedMeasure[S], float)
+    grad_eval : list of
+                (SimilarityClass[S], float) -> (SignedMeasure[S], float)
         List of gradient evaluators. Must correspond element-wise with
         `func_eval`.
 
@@ -163,8 +192,8 @@ def eval_pen_grad(
     grad_err_bnd : float (optional, keyword-only)
         Initial error bound for the constraint functional gradient. Passed on
         to the evaluation loop as an initial bound. Must be strictly positive
-        unless all evaluators return an error estimate of zero. Can be infinite.
-        Defaults to positive infinity.
+        unless all evaluators return an error estimate of zero. Can be
+        infinite. Defaults to positive infinity.
 
     grad_err_decay: float (optional, keyword-only)
         Error decay rate for the controlled evaluation loop. Must be strictly
@@ -198,15 +227,20 @@ def eval_pen_grad(
         weights = numpy.ones(len(func_eval))
     else:
         weights = numpy.broadcast_to(numpy.asarray(weights), len(func_eval))
-    weights = numpy.asarray(numpy.clip(weights, a_min=0.0, a_max=None, dtype=float))
+    weights = numpy.asarray(numpy.clip(weights, a_min=0.0, a_max=None,
+                                       dtype=float))
 
-    def fix_pen_param(pen_param: float) -> Callable[[SimilarityClass[_Tspc], float], tuple[SignedMeasure[_Tspc], float]]:
+    def fix_pen_param(pen_param: float) -> Callable[
+        [SimilarityClass[_Tspc], float],
+        tuple[SignedMeasure[_Tspc], float]
+    ]:
         # Write coefficients for error apportionment.
         bnd_coeff = numpy.copy(weights)
         bnd_coeff[:-1] *= pen_param
         bnd_coeff /= bnd_coeff.sum()
 
-        def penalty_evaluator(arg: SimilarityClass[_Tspc], err_bnd: float) -> tuple[SignedMeasure[_Tspc], float]:
+        def penalty_evaluator(arg: SimilarityClass[_Tspc], err_bnd: float
+                              ) -> tuple[SignedMeasure[_Tspc], float]:
             if math.isinf(err_bnd):
                 bnd = numpy.full_like(bnd_coeff, numpy.inf)
             else:
@@ -230,6 +264,7 @@ def eval_pen_grad(
                 ),
                 grad_eval[-1](arg, bnd[-1])
             ]
-            return sum((v for v, _ in results[1:]), start=results[0][0]), sum((e for _, e in results))
+            return (sum((v for v, _ in results[1:]), start=results[0][0]),
+                    sum((e for _, e in results)))
         return error_control_cache(penalty_evaluator, cache_size=2)
     return fix_pen_param
