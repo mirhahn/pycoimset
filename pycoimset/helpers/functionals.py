@@ -21,7 +21,6 @@ import math
 from typing import Generic, Optional, Sequence, TypeVar
 
 import numpy
-from numpy import float_
 from numpy.typing import NDArray, ArrayLike
 
 from ..typing import (
@@ -237,10 +236,10 @@ class weighted_sum(Functional[Spc], Generic[Spc]):
     '''
     _spc: Spc
     _gtype: ErrorNorm
-    _c: NDArray[float_]
+    _c: NDArray[numpy.floating]
     _f: Sequence[Functional[Spc]]
-    _vwgt: NDArray[float_]
-    _gwgt: NDArray[float_]
+    _vwgt: NDArray[numpy.floating]
+    _gwgt: NDArray[numpy.floating]
     _vtol: float
     _gtol: float
 
@@ -256,11 +255,11 @@ class weighted_sum(Functional[Spc], Generic[Spc]):
             if f.grad_tol_type is not self._gtype:
                 raise ValueError('all components must have the same error control type')
         self._f = func
-        self._c = numpy.broadcast_to(numpy.asarray(coef, dtype=float_),
+        self._c = numpy.broadcast_to(numpy.asarray(coef, dtype=float),
                                      len(func))
-        self._vwgt = numpy.broadcast_to(numpy.asarray(val_wgt, dtype=float_),
+        self._vwgt = numpy.broadcast_to(numpy.asarray(val_wgt, dtype=float),
                                         len(func))
-        self._gwgt = numpy.broadcast_to(numpy.asarray(grad_wgt, dtype=float_),
+        self._gwgt = numpy.broadcast_to(numpy.asarray(grad_wgt, dtype=float),
                                         len(func))
         self._vtol = math.inf
         self._gtol = math.inf
@@ -328,8 +327,8 @@ class weighted_sum(Functional[Spc], Generic[Spc]):
     
     def get_value(self) -> tuple[float, float]:
         '''Return value-error pair.'''
-        val = numpy.empty(len(self._f), dtype=float_)
-        err = numpy.empty(len(self._f), dtype=float_)
+        val = numpy.empty(len(self._f), dtype=float)
+        err = numpy.empty(len(self._f), dtype=float)
         for i, f in enumerate(self._f):
             val[i], err[i] = f.get_value()
         return numpy.inner(self._c, val), numpy.inner(numpy.abs(self._c), err)
@@ -337,7 +336,7 @@ class weighted_sum(Functional[Spc], Generic[Spc]):
     def get_gradient(self) -> tuple[SignedMeasure[Spc], float]:
         '''Return gradient-error pair.'''
         grad = None
-        err = numpy.empty(len(self._f), dtype=float_)
+        err = numpy.empty(len(self._f), dtype=float)
         for i, (c, f) in enumerate(zip(self._c, self._f)):
             g, err[i] = f.get_gradient()
             if grad is None:
