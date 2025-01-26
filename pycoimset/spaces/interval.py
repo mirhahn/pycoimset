@@ -19,13 +19,16 @@ set encoding.
 
 from collections.abc import Callable
 from types import NotImplementedType
-from typing import Self, TypeVar
+from typing import Generic, Self, TypeVar
 
 import numpy
 from numpy.typing import ArrayLike, NDArray
 
 from ..typing.space import SignedMeasure, SimilarityClass, SimilaritySpace
 from .generic import EmptyClass, UniversalClass
+
+
+__all__ = ["IntervalBorelSpace", "SwitchTimeClass"]
 
 
 Spc = TypeVar('Spc', bound='IntervalBorelSpace')
@@ -104,7 +107,7 @@ class IntervalBorelSpace(SimilaritySpace):
         )
 
 
-class SwitchTimeClass(SimilarityClass[Spc]):
+class SwitchTimeClass(SimilarityClass[Spc], Generic[Spc]):
     """
     Similarity class encoded as a sorted vector of distinct switching times.
     """
@@ -126,10 +129,10 @@ class SwitchTimeClass(SimilarityClass[Spc]):
         """
         while numpy.any(mask := time_vec[1:] == time_vec[:-1]):
             mask = numpy.append(mask, [False])
-            if numpy.any(mask[:-2:2]):
-                mask[1::2] = mask[:-2:2]
+            if numpy.any(mask[:-1:2]):
+                mask[1::2] = mask[:-1:2]
             else:
-                mask[2::2] = mask[1::2]
+                mask[2::2] = mask[1:-1:2]
             time_vec = numpy.delete(time_vec, numpy.flatnonzero(mask))
         return time_vec
 
@@ -158,6 +161,15 @@ class SwitchTimeClass(SimilarityClass[Spc]):
     def measure(self) -> float:
         t = self._times
         return float(numpy.sum(t[1::2] - t[::2]))
+
+    @property
+    def switch_times(self):
+        """
+        Read-only view of the switch time array.
+        """
+        t = self._times.view()
+        t.setflags(write=False)
+        return t
 
     def subset(self, meas_low: float, meas_high: float,
                hint: SignedMeasure[Spc] | None = None
@@ -206,7 +218,7 @@ class SwitchTimeClass(SimilarityClass[Spc]):
         # Add switching times at start and end of the switching time vector.
         lb, ub = self._space.bounds
         return type(self)(
-            self._space, numpy.concatenate((lb, self._times, ub))
+            self._space, numpy.concatenate(([lb], self._times, [ub]))
         )
 
     def __or__(self, b: SimilarityClass[Spc]
@@ -246,7 +258,7 @@ class SwitchTimeClass(SimilarityClass[Spc]):
                 comp_right = ([t], t_b[j:])
             else:
                 comp_right = (t_b[j:],)
-            t_b = numpy.concatenate((*comp_left, *comp_right))
+            t_b = numpy.concatenate(([], *comp_left, *comp_right))
 
         return SwitchTimeClass[Spc](self._space, t_b)
 
@@ -272,7 +284,7 @@ class SwitchTimeClass(SimilarityClass[Spc]):
 
         # Iterate over the insertion ranges of `a` in `b` to build component
         # list.
-        comp = []
+        comp: list[ArrayLike] = [[]]
         for i, s, j, t in zip(idx_start, t_a[::2], idx_end, t_a[1::2]):
             if i % 2 != 0:
                 comp.append([s])
@@ -302,7 +314,7 @@ class SwitchTimeClass(SimilarityClass[Spc]):
 
         # Iterate over the insertion ranges of `a` in `b` to build component
         # list.
-        comp = []
+        comp: list[ArrayLike] = [[]]
         idx_run = 0
         for i, s, j, t in zip(idx_start, t_b[::2], idx_end, t_b[1::2]):
             comp.append(t_a[idx_run:i])
@@ -344,5 +356,5 @@ class SwitchTimeClass(SimilarityClass[Spc]):
         # NOTE: This uses a regular sort, though merging of sorted lists can
         # be done more quickly.
         return SwitchTimeClass[Spc](
-            self._space, numpy.concatenate((self._times, b._times))
+            self._space, numpy.concatenate(([], self._times, b._times))
         )
