@@ -1,10 +1,15 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
 [project]
 name = "pycoimset"
 dynamic = ["version"]
 description = "Python library for optimization of sets"
 readme = "README.md"
 requires-python = ">= 3.11"
-license = { file = "LICENSE.md" }
+license = "Apache-2.0"
+license-files = ["LICEN[CS]E*"]
 authors = [ { name = "Mirko Hahn", email = "mirhahn@ovgu.de" } ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -19,10 +24,26 @@ dependencies = [
 source = "https://github.com/mirhahn/pycoimset"
 issues = "https://github.com/mirhahn/pycoimset/issues"
 
-[build-system]
-requires = ["setuptools", "wheel", "setuptools_scm[toml]>=6.2"]
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0"
+]
 
-[tool.setuptools.packages.find]
-include = ["pycoimset*"]
+[tool.hatch.build.targets.wheel]
+packages = ["pycoimset"]
 
-[tool.setuptools_scm]
+[tool.hatch.build.targets.sdist]
+include = [
+    "/pycoimset/**/*.py",
+    "/test"
+]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "test"
+]
