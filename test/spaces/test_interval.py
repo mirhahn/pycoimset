@@ -230,7 +230,6 @@ def test_switch_time_constructor(space, switch_times):
     space = cast(IntervalBorelSpace, space["space"])
     simcls = SwitchTimeClass(space, switch_times)
 
-
     lb, ub = space.bounds
     t = simcls.switch_times
 
@@ -297,7 +296,7 @@ def test_simcls_combination(simclass_lhs, simclass_rhs):
 
 def test_simcls_subset(simclass_lhs, measure_bounds):
     meas_low, meas_high = measure_bounds
-    
+
     effective_meas_low = max(meas_low, 0)
     effective_meas_high = min(meas_high, simclass_lhs.measure)
     has_subset = effective_meas_high >= effective_meas_low
