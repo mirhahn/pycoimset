@@ -174,6 +174,10 @@ class SwitchTimeClass(SimilarityClass[Spc], Generic[Spc]):
     def subset(self, meas_low: float, meas_high: float,
                hint: SignedMeasure[Spc] | None = None
                ) -> Self:
+        # Immediately reject invalid measure ranges.
+        if meas_low > meas_high or meas_high < 0:
+            raise ValueError("Cannot satisfy subset request: measure invalid")
+
         # Calculate measures of individual intervals.
         t = self._times
         dt = t[1::2] - t[::2]
@@ -198,6 +202,10 @@ class SwitchTimeClass(SimilarityClass[Spc], Generic[Spc]):
 
         # Calculate remaining measure.
         base_measure = 0.0 if idx_brk == 0 else dt_cum[idx_brk - 1]
+
+        # Raise ValueError if `meas_low` cannot be satisfied.
+        if base_measure < meas_low and idx_partial is None:
+            raise ValueError("Cannot satisfy subset request: class too small")
 
         # Fill with partial interval if necessary.
         if base_measure < meas_low and idx_partial is not None:
