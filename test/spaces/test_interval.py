@@ -105,6 +105,90 @@ _switch_times = [
 ]
 
 
+_measure_bounds = [
+    (6.5, 5.375),
+    (3.125, 1.875),
+    (1.625, 18.0),
+    (13.75, 16.875),
+    (0.0, 0.375),
+    (6.125, 14.5),
+    (14.375, 8.75),
+    (2.125, 14.0),
+    (15.75, 7.875),
+    (19.5, 18.75),
+    (4.5, 1.5),
+    (5.5, 8.125),
+    (20.0, 9.625),
+    (15.625, 9.0),
+    (10.125, 6.75),
+    (19.5, 2.5),
+    (11.375, 17.875),
+    (9.5, 5.125),
+    (9.25, 19.0),
+    (13.0, 18.75),
+    (6.875, 10.25),
+    (1.25, 3.75),
+    (3.5, 11.375),
+    (16.875, 2.5),
+    (19.125, 19.875),
+    (5.625, 0.0),
+    (14.625, 7.0),
+    (13.0, 17.625),
+    (11.0, 7.25),
+    (4.125, 8.0),
+    (14.75, 5.875),
+    (5.375, 17.25),
+    (7.125, 15.0),
+    (9.375, 6.5),
+    (17.625, 17.75),
+    (10.25, 11.25),
+    (16.875, 2.125),
+    (19.125, 7.375),
+    (6.875, 13.5),
+    (13.5, 1.625),
+    (-7.125, 0.25),
+    (-19.875, -11.875),
+    (-17.5, 16.0),
+    (-13.875, -4.375),
+    (0.375, -18.0),
+    (-19.5, 4.875),
+    (13.125, -5.625),
+    (10.75, -20.0),
+    (16.0, 18.25),
+    (4.375, -12.875),
+    (3.125, 13.25),
+    (-3.125, -15.75),
+    (10.0, 0.625),
+    (-10.125, 8.375),
+    (10.375, 4.125),
+    (-17.375, 4.375),
+    (-5.375, -6.625),
+    (9.375, 1.0),
+    (1.75, 3.0),
+    (-0.25, -11.625),
+    (-18.5, 14.0),
+    (0.0, 7.625),
+    (15.125, -5.5),
+    (-0.5, -0.625),
+    (1.25, -11.75),
+    (-16.125, 18.0),
+    (-2.375, -0.625),
+    (13.625, -15.0),
+    (-14.5, -2.125),
+    (-3.625, -7.375),
+    (-17.75, 10.75),
+    (1.375, -19.0),
+    (-5.125, 8.5),
+    (0.75, 4.625),
+    (-4.5, 12.25),
+    (2.125, 4.125),
+    (-3.25, -14.625),
+    (15.125, -3.0),
+    (-9.875, 15.125),
+    (15.5, 15.25)
+]
+
+
 # FIXTURES
 @pytest.fixture(scope='module', params=[
     {"args": (0, 1), "measure": 1.0, "empty": False},
@@ -135,6 +219,26 @@ def simclass_lhs(space, request):
 )
 def simclass_rhs(space, request):
     return SwitchTimeClass(space["space"], request.param)
+
+
+@pytest.fixture(
+    scope='module',
+    params=_measure_bounds + sorted(_measure_bounds)
+)
+def measure_bounds(request):
+    return request.param
+
+
+# HELPERS
+def check_subset(sub, sup):
+    t_sub, t_sup = sub.switch_times, sup.switch_times
+    assert all((
+        any((
+            u <= s and v >= t
+            for u, v in zip(t_sup[::2], t_sup[1::2])
+        ))
+        for s, t in zip(t_sub[::2], t_sub[1::2])
+    ))
 
 
 # TESTS
@@ -197,18 +301,52 @@ def test_switch_time_constructor(space, switch_times):
 
 
 def test_simcls_combination(simclass_lhs, simclass_rhs):
-    # Helper function
-    def check_subset(sub, sup):
-        t_sub, t_sup = sub.switch_times, sup.switch_times
-        assert all((
-            any((
-                u <= s and v >= t
-                for u, v in zip(t_sup[::2], t_sup[1::2])
-            ))
-            for s, t in zip(t_sub[::2], t_sub[1::2])
-        ))
-
     # Check intersection
     simclass_intersect = simclass_lhs & simclass_rhs
     check_subset(simclass_intersect, simclass_lhs)
     check_subset(simclass_intersect, simclass_rhs)
+
+    # Check union
+    simclass_union = simclass_lhs | simclass_rhs
+    check_subset(simclass_lhs, simclass_union)
+    check_subset(simclass_rhs, simclass_union)
+
+    # Check set difference
+    simclass_diff_left = simclass_lhs - simclass_rhs
+    check_subset(simclass_diff_left, simclass_lhs)
+    assert (simclass_diff_left & simclass_rhs).measure == 0
+
+    simclass_diff_right = simclass_rhs - simclass_lhs
+    check_subset(simclass_diff_right, simclass_rhs)
+    assert (simclass_diff_right & simclass_lhs).measure == 0
+
+    # Check symmetric difference
+    simclass_symdiff = simclass_lhs ^ simclass_rhs
+    assert numpy.all(
+        simclass_symdiff.switch_times
+        == (simclass_diff_left | simclass_diff_right).switch_times
+    )
+    assert (simclass_symdiff & simclass_intersect).measure == 0
+    check_subset(simclass_symdiff, simclass_union)
+
+    # Check complement
+    simclass_lhs_compl = ~simclass_lhs
+    assert (simclass_lhs_compl & simclass_lhs).measure == 0
+    check_subset(simclass_diff_right, simclass_lhs_compl)
+
+
+def test_simcls_subset(simclass_lhs, measure_bounds):
+    meas_low, meas_high = measure_bounds
+    
+    effective_meas_low = max(meas_low, 0)
+    effective_meas_high = min(meas_high, simclass_lhs.measure)
+    has_subset = effective_meas_high >= effective_meas_low
+
+    if has_subset:
+        simclass_subset = simclass_lhs.subset(meas_low, meas_high)
+        check_subset(simclass_subset, simclass_lhs)
+        assert meas_low <= simclass_subset.measure
+        assert meas_high >= simclass_subset.measure
+    else:
+        with pytest.raises(ValueError):
+            simclass_lhs.subset(meas_low, meas_high)
