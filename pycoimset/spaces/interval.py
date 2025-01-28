@@ -241,8 +241,8 @@ class SwitchTimeClass(SimilarityClass[Spc], Generic[Spc]):
         t_b = numpy.copy(t_b)
 
         # Search for insertion points for `a`'s intervals in `b`.
-        idx_start = numpy.searchsorted(t_a[::2], t_b, side='left')
-        idx_end = numpy.searchsorted(t_a[1::2], t_b, side='right')
+        idx_start = numpy.searchsorted(t_b, t_a[::2], side='left')
+        idx_end = numpy.searchsorted(t_b, t_a[1::2], side='right')
 
         # Iterate over the insertion ranges of `a` in `b` in reverse.
         # NOTE: We do this in reverse so that earlier indices do not shift.
@@ -279,8 +279,8 @@ class SwitchTimeClass(SimilarityClass[Spc], Generic[Spc]):
             t_a, t_b = t_b, t_a
 
         # Search for insertion points for `a`'s intervals in `b`.
-        idx_start = numpy.searchsorted(t_a[::2], t_b, side='right')
-        idx_end = numpy.searchsorted(t_a[1::2], t_b, side='left')
+        idx_start = numpy.searchsorted(t_b, t_a[::2], side='right')
+        idx_end = numpy.searchsorted(t_b, t_a[1::2], side='left')
 
         # Iterate over the insertion ranges of `a` in `b` to build component
         # list.
@@ -309,8 +309,8 @@ class SwitchTimeClass(SimilarityClass[Spc], Generic[Spc]):
         t_a, t_b = self._times, b._times
 
         # Find insertion points of `b` in `a`.
-        idx_start = numpy.searchsorted(t_b[::2], t_a, side='right')
-        idx_end = numpy.searchsorted(t_b[1::2], t_a, side='left')
+        idx_start = numpy.searchsorted(t_a, t_b[::2], side='right')
+        idx_end = numpy.searchsorted(t_a, t_b[1::2], side='left')
 
         # Iterate over the insertion ranges of `a` in `b` to build component
         # list.
