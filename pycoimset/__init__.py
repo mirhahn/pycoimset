@@ -31,6 +31,7 @@ from .typing import (
     UnconstrainedStepFinder,
 )
 
+
 __all__ = [
     'Constraint',
     'ErrorNorm',
@@ -45,3 +46,11 @@ __all__ = [
     'SimilaritySpace',
     'SteepestDescentStepFinder'
 ]
+
+
+if __package__ is not None and '__version__' not in locals():
+    import importlib.metadata
+    try:
+        __version__ = importlib.metadata.version(__package__)
+    except importlib.metadata.PackageNotFoundError:
+        pass
